@@ -2391,10 +2391,29 @@ tbody tr:hover{background:var(--panel-2)}
     monthPosts.forEach(function(x){ var k = x.contentType || "Без типа"; byType[k] = (byType[k]||0)+1; });
     return {rangeLabel:rangeLabel, spent:spent, reach:reach, planned:planned, published:published, byType:byType};
   }
+  // Статистика по текущему спринту (неделе) — отдельно от месячной сводки
+  // выше: охваты/запланировано/вышло считаем за спринт, но стоимость сюда
+  // намеренно НЕ включаем — цена размещения считается только за месяц
+  // (см. calendarSummary/"Потрачено"), чтобы не задваивать и не путать
+  // бюджет месяца с недельным срезом.
+  function currentSprintSummary(){
+    var sp = currentSprint();
+    var startStr = sp.start.toISOString().slice(0,10);
+    var endStr = sp.end.toISOString().slice(0,10);
+    var sprintPosts = posts.filter(function(x){ return x.date && x.date>=startStr && x.date<=endStr; });
+    return {
+      label: sp.label,
+      reach: sprintPosts.reduce(function(s,x){ return s + (x.reach||0); }, 0),
+      planned: sprintPosts.filter(function(x){ return x.status==="planned"; }).length,
+      published: sprintPosts.filter(function(x){ return x.status==="published"; }).length,
+      total: sprintPosts.length
+    };
+  }
   function renderCalendarSummary(){
     var el = document.getElementById("calSummary");
     if (!el) return;
     var s = calendarSummary();
+    var sp = currentSprintSummary();
     var typeRows = Object.keys(s.byType).sort(function(a,b){ return s.byType[b]-s.byType[a]; })
       .map(function(k){ return '<span>'+esc(k)+': <b>'+s.byType[k]+'</b></span>'; }).join(" · ");
     el.innerHTML = '<div class="card" style="padding:12px 16px;margin-bottom:14px">'+
@@ -2406,6 +2425,13 @@ tbody tr:hover{background:var(--panel-2)}
         '<span>Охваты всего: <b style="color:var(--fg)">'+s.reach.toLocaleString("ru-RU")+'</b></span>'+
         '<span>Запланировано: <b style="color:var(--fg)">'+s.planned+'</b></span>'+
         '<span>Вышло: <b style="color:var(--fg)">'+s.published+'</b></span>'+
+      '</div>'+
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px;font-size:12.5px;color:var(--muted)">'+
+        '<span class="mono" style="color:var(--muted-2)">Спринт '+sp.label+' (текущий)</span>'+
+        '<span>Охваты: <b style="color:var(--fg)">'+sp.reach.toLocaleString("ru-RU")+'</b></span>'+
+        '<span>Запланировано: <b style="color:var(--fg)">'+sp.planned+'</b></span>'+
+        '<span>Вышло: <b style="color:var(--fg)">'+sp.published+'</b></span>'+
+        '<span>Всего постов: <b style="color:var(--fg)">'+sp.total+'</b></span>'+
       '</div>'+
       (typeRows? '<div style="margin-top:8px;font-size:12px;color:var(--muted)">'+typeRows+'</div>' : "")+
     '</div>';
