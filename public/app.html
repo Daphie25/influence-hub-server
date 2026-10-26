@@ -1881,42 +1881,37 @@ tbody tr:hover{background:var(--panel-2)}
   // ("Задача отдела", без партнёра) и задачи по партнёрам, которые сейчас не
   // в воронке, в этот разрез не попадают — это специально про текущую
   // загрузку по хантингу и аккаунтингу, а не про все задачи подряд.
+  // Таблица «Задачи по воронкам»: строки — стадии воронки (общий набор
+  // для обоих режимов, см. FUNNEL_STAGES), столбцы — Хантинг/Аккаунтинг.
+  // Считаем партнёров, которые СЕЙЧАС находятся в этой стадии этой воронки
+  // (p.funnel.mode + p.funnel.stage), а не статусы отдельных задач.
   function dashFunnelTaskStatusHtml(){
-    function countsFor(mode, assignee){
-      var list = tasks.filter(function(t){
-        if (t.kind !== "partner" || !t.partnerId) return false;
-        if (t.assignee !== assignee) return false;
-        var p = partners.find(function(x){ return x.id === t.partnerId; });
-        return !!(p && p.funnel && p.funnel.mode === mode);
-      });
+    function countsForMode(mode){
       var out = {};
-      TASK_STATUS.forEach(function(s){
-        out[s.v] = list.filter(function(t){ return taskStatusOf(t) === s.v; }).length;
+      FUNNEL_STAGES.forEach(function(s){
+        out[s.v] = partners.filter(function(p){
+          return !!(p.funnel && p.funnel.mode===mode && p.funnel.stage===s.v);
+        }).length;
       });
       return out;
     }
-    var people = [ROLE_ASSIGNEES.lead, ROLE_ASSIGNEES.mng];
-    var groups = [
-      {mode:"hunting", label:"Задачи Influence Хантинг"},
-      {mode:"accounting", label:"Задачи Influence Аккаунтинг"}
-    ];
-    return groups.map(function(g, i){
-      var personRows = people.map(function(name){
-        var c = countsFor(g.mode, name);
-        return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:6px">'+
-          '<span style="font-size:12.5px;color:var(--muted)">'+esc(name)+'</span>'+
-          '<div style="display:flex;gap:14px;font-size:12.5px">'+
-            TASK_STATUS.map(function(s){
-              return '<span><span class="chip '+s.chip+'" style="margin-right:5px">'+esc(s.label)+'</span>'+(c[s.v]||0)+'</span>';
-            }).join("")+
-          '</div>'+
-        '</div>';
-      }).join("");
-      return '<div style="margin-bottom:'+(i<groups.length-1?"14px":"0")+';'+(i<groups.length-1?"padding-bottom:14px;border-bottom:1px solid var(--border)":"")+'">'+
-        '<div style="font-weight:600;font-size:13px">'+esc(g.label)+'</div>'+
-        personRows+
-      '</div>';
+    var hunt = countsForMode("hunting");
+    var acct = countsForMode("accounting");
+    var rows = FUNNEL_STAGES.map(function(s){
+      return '<tr style="border-top:1px solid var(--border)">'+
+        '<td style="padding:7px 10px 7px 0;color:var(--muted)">'+esc(s.label)+'</td>'+
+        '<td style="padding:7px 10px;text-align:center" class="mono">'+(hunt[s.v]||0)+'</td>'+
+        '<td style="padding:7px 0 7px 10px;text-align:center" class="mono">'+(acct[s.v]||0)+'</td>'+
+      '</tr>';
     }).join("");
+    return '<table style="width:100%;border-collapse:collapse;font-size:12.5px">'+
+      '<thead><tr>'+
+        '<th style="text-align:left;padding:0 10px 6px 0;color:var(--muted);font-weight:500">Стадия</th>'+
+        '<th style="text-align:center;padding:0 10px 6px;font-weight:600">Хантинг</th>'+
+        '<th style="text-align:center;padding:0 0 6px 10px;font-weight:600">Аккаунтинг</th>'+
+      '</tr></thead>'+
+      '<tbody>'+rows+'</tbody>'+
+    '</table>';
   }
 
   function dashAssigneeStatusHtml(){
