@@ -28,6 +28,13 @@
   color-scheme: light;
 }
 *{box-sizing:border-box}
+/* Без этого правила атрибут hidden не перебивает явный display у
+   кнопок/блоков (.btn, .card и т.п.) — элемент с hidden=true продолжал
+   бы показываться, если у него тот же приоритет CSS-правила, что и у
+   [hidden] в стиле браузера по умолчанию. Из-за этого, например, при
+   переключении вкладки «По партнёрам» на «Задачи» кнопки «+ Задача» и
+   «+ Партнёр в воронку» могли светиться одновременно. */
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:50;background:var(--bg)}
 h1,h2,h3{font-family:var(--font-display);font-weight:600;text-wrap:balance;margin:0}
