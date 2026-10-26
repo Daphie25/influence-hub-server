@@ -3818,15 +3818,34 @@ tbody tr:hover{background:var(--panel-2)}
       var label = ping.count>=3 ? ("Ждём ответ до "+fmtDate(ping.nextDate)+" → архив") : ("Пинг "+(ping.count+1)+"/3 · "+fmtDate(ping.nextDate));
       extraHtml = '<div class="funnel-post-dates"><span class="'+(urgent?"soon":"")+'">'+esc(label)+'</span></div>';
     }
+    // Ответственного можно поменять прямо на карточке воронки (а не только
+    // один раз при постановке в воронку) — иначе партнёр, которому забыли
+    // или не успели проставить assignee вовремя, так и остаётся "ничейным"
+    // без способа это поправить задним числом.
+    var assigneeControl = canWrite ?
+      '<select class="funnel-assignee-select" data-partner-id="'+p.id+'" onclick="event.stopPropagation()" style="margin-top:6px;width:100%;font-size:11.5px;padding:3px 6px;border-radius:6px;background:var(--raised);color:var(--muted);border:1px solid var(--border)">'+
+        '<option value="" '+(!assignee?"selected":"")+'>— не назначено —</option>'+
+        '<option value="'+esc(ROLE_ASSIGNEES.lead)+'" '+(assignee===ROLE_ASSIGNEES.lead?"selected":"")+'>'+esc(ROLE_ASSIGNEES.lead)+'</option>'+
+        '<option value="'+esc(ROLE_ASSIGNEES.mng)+'" '+(assignee===ROLE_ASSIGNEES.mng?"selected":"")+'>'+esc(ROLE_ASSIGNEES.mng)+'</option>'+
+      '</select>' :
+      (assignee ? '<div style="margin-top:6px;font-size:11.5px;color:var(--muted)">'+esc(assignee)+'</div>' : '');
     return '<div class="kanban-card'+(urgent?" funnel-urgent":"")+'" data-partner-id="'+p.id+'" '+(canWrite?'draggable="true"':'')+'>'+
       '<div class="ct">'+esc(p.name||"—")+(urgent?' <span style="color:var(--bad)">●</span>':'')+'</div>'+
-      '<div class="cm">'+(p.platform?'<span>'+esc(p.platform)+'</span>':'')+(assignee?'<span>'+esc(assignee)+'</span>':'')+'</div>'+
+      '<div class="cm">'+(p.platform?'<span>'+esc(p.platform)+'</span>':'')+'</div>'+
       extraHtml+
+      assigneeControl+
       (canWrite? '<div class="kanban-move">'+
         '<button class="btn btn-ghost" data-move="-1" '+(canPrev?'':'disabled')+'>‹ Назад</button>'+
         '<button class="btn btn-ghost" data-move="1">'+(idx===FUNNEL_STAGES.length-1?"Завершить ✓":"Вперёд ›")+'</button>'+
       '</div>' : '')+
     '</div>';
+  }
+  function setFunnelAssignee(partnerId, value){
+    if (!db) return;
+    var p = partners.find(function(x){ return x.id===partnerId; });
+    if (!p || !p.funnel) return;
+    var funnel = Object.assign({}, p.funnel, {assignee:value, updatedAt:new Date().toISOString()});
+    db.doc("partners/"+partnerId).update({funnel:funnel}).then(refreshData).catch(function(){});
   }
   function renderFunnelView(){
     document.querySelectorAll("#funnelModeTabs .tab").forEach(function(t){ t.classList.toggle("active", t.dataset.m===funnelModeFilter); });
@@ -3876,6 +3895,13 @@ tbody tr:hover{background:var(--panel-2)}
         });
         card.addEventListener("dragend", function(){ card.classList.remove("dragging"); });
       }
+    });
+    body.querySelectorAll(".funnel-assignee-select").forEach(function(sel){
+      sel.addEventListener("click", function(e){ e.stopPropagation(); });
+      sel.addEventListener("change", function(e){
+        e.stopPropagation();
+        setFunnelAssignee(sel.dataset.partnerId, sel.value);
+      });
     });
     body.querySelectorAll("[data-move]").forEach(function(btn){
       btn.addEventListener("click", function(e){
