@@ -194,28 +194,6 @@ function handleApi(req, res, parsed, authed) {
     return;
   }
 
-  // Temporary admin helper: restore any partner that's missing from the
-  // live store but present in partners-snapshot.json (taken at the original
-  // migration), WITHOUT touching partners that already exist — so today's
-  // edits to other partners are untouched, and this only re-adds ones that
-  // were deleted by accident since the migration. One-off, removed after use.
-  if (pathname === "/api/admin/restore-missing-partners" && req.method === "GET") {
-    const snapPath = path.join(__dirname, "partners-snapshot.json");
-    if (!fs.existsSync(snapPath)) { sendJson(res, 404, { error: "no_snapshot" }); return; }
-    const snap = loadJson(snapPath, {});
-    const live = col("partners");
-    const restored = [];
-    Object.keys(snap.partners || {}).forEach(function (id) {
-      if (!live[id]) {
-        live[id] = { data: snap.partners[id].data, version: 1, updatedAt: new Date().toISOString() };
-        restored.push(id);
-      }
-    });
-    if (restored.length) persistStore();
-    sendJson(res, 200, { ok: true, restoredCount: restored.length, restoredIds: restored, liveTotal: Object.keys(live).length });
-    return;
-  }
-
   if (pathname === "/api/list" && req.method === "GET") {
     const q = parsed.query;
     const rows = listCollection(q.collection || "", { orderBy: q.orderBy, dir: q.dir, limit: q.limit ? parseInt(q.limit, 10) : null });
