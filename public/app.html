@@ -2401,24 +2401,33 @@ tbody tr:hover{background:var(--panel-2)}
     var startStr = sp.start.toISOString().slice(0,10);
     var endStr = sp.end.toISOString().slice(0,10);
     var sprintPosts = posts.filter(function(x){ return x.date && x.date>=startStr && x.date<=endStr; });
+    var byType = {};
+    sprintPosts.forEach(function(x){ var k = x.contentType || "Без типа"; byType[k] = (byType[k]||0)+1; });
     return {
       label: sp.label,
       reach: sprintPosts.reduce(function(s,x){ return s + (x.reach||0); }, 0),
       planned: sprintPosts.filter(function(x){ return x.status==="planned"; }).length,
       published: sprintPosts.filter(function(x){ return x.status==="published"; }).length,
-      total: sprintPosts.length
+      total: sprintPosts.length,
+      byType: byType
     };
+  }
+  function typeRowsHtml(byType){
+    return Object.keys(byType).sort(function(a,b){ return byType[b]-byType[a]; })
+      .map(function(k){ return esc(k)+': <b style="color:var(--fg)">'+byType[k]+'</b>'; }).join(" · ");
   }
   function renderCalendarSummary(){
     var el = document.getElementById("calSummary");
     if (!el) return;
     var s = calendarSummary();
     var sp = currentSprintSummary();
-    var typeRows = Object.keys(s.byType).sort(function(a,b){ return s.byType[b]-s.byType[a]; })
-      .map(function(k){ return '<span>'+esc(k)+': <b>'+s.byType[k]+'</b></span>'; }).join(" · ");
+    var monthTypeRows = typeRowsHtml(s.byType);
+    var sprintTypeRows = typeRowsHtml(sp.byType);
     // Две колонки через вертикальную черточку: слева — месяц (тут же и
     // единственное место, где считается цена — "Потрачено"), справа —
-    // текущий спринт (без цены, она намеренно только месячная).
+    // текущий спринт (без цены, она намеренно только месячная). Разбивка
+    // по типам контента (TG пост / YouTube видео и т.д.) — своя в каждой
+    // колонке, по постам именно этого периода, а не общая на обе сразу.
     var monthCol = '<div style="flex:1;min-width:0">'+
         '<div class="mono" style="font-size:12px;color:var(--muted);margin-bottom:6px">'+s.rangeLabel+'</div>'+
         '<div style="font-size:13.5px;font-weight:600;margin-bottom:6px">Потрачено '+fmtMoney(s.spent)+'</div>'+
@@ -2427,6 +2436,7 @@ tbody tr:hover{background:var(--panel-2)}
           'Запланировано: <b style="color:var(--fg)">'+s.planned+'</b> · '+
           'Вышло: <b style="color:var(--fg)">'+s.published+'</b>'+
         '</div>'+
+        (monthTypeRows? '<div style="margin-top:6px;font-size:12px;color:var(--muted)">'+monthTypeRows+'</div>' : "")+
       '</div>';
     var sprintCol = '<div style="flex:1;min-width:0;border-left:1px solid var(--border);padding-left:16px">'+
         '<div class="mono" style="font-size:12px;color:var(--muted);margin-bottom:6px">Спринт '+sp.label+' (текущий)</div>'+
@@ -2436,10 +2446,10 @@ tbody tr:hover{background:var(--panel-2)}
           'Запланировано: <b style="color:var(--fg)">'+sp.planned+'</b> · '+
           'Вышло: <b style="color:var(--fg)">'+sp.published+'</b>'+
         '</div>'+
+        (sprintTypeRows? '<div style="margin-top:6px;font-size:12px;color:var(--muted)">'+sprintTypeRows+'</div>' : "")+
       '</div>';
     el.innerHTML = '<div class="card" style="padding:12px 16px;margin-bottom:14px">'+
       '<div style="display:flex;gap:16px;flex-wrap:wrap">'+monthCol+sprintCol+'</div>'+
-      (typeRows? '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">'+typeRows+'</div>' : "")+
     '</div>';
   }
   function renderCalendarView(){
