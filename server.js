@@ -45,7 +45,23 @@ function saveJsonAtomic(file, obj) {
   fs.renameSync(tmp, file);
 }
 
-let store = loadJson(STORE_FILE, {});
+// One-time data import: on a brand-new persistent disk (no store.json yet),
+// if a seed-data.json shipped in the repo, load it as the starting dataset
+// (e.g. the real partners/tasks/posts migrated from the old Claude Artifact).
+// This only fires once — as soon as it runs, store.json is written to disk,
+// so every later restart sees an existing store.json and skips re-seeding
+// (which matters: we never want a restart to stomp on real edits made since
+// the import with the old seed data again).
+const SEED_FILE = path.join(__dirname, "seed-data.json");
+let store;
+if (!fs.existsSync(STORE_FILE) && fs.existsSync(SEED_FILE)) {
+  console.log("No existing store.json on this disk — importing seed-data.json...");
+  store = loadJson(SEED_FILE, {});
+  saveJsonAtomic(STORE_FILE, store);
+  console.log("Seed import done: " + Object.keys(store).map(function(c){ return c + "=" + Object.keys(store[c]).length; }).join(", "));
+} else {
+  store = loadJson(STORE_FILE, {});
+}
 let uploadsIndex = loadJson(UPLOADS_INDEX_FILE, {});
 
 function persistStore() { saveJsonAtomic(STORE_FILE, store); }
