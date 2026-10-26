@@ -2829,6 +2829,22 @@ tbody tr:hover{background:var(--panel-2)}
           taskTitle: str(rid+"TaskTitle"), taskDue: document.getElementById(rid+"TaskDue").value
         };
       }).filter(function(r){ return r.date; }); // ряд без даты в расчёт не берём
+      // Напоминание "выйти на связь для контроля" теперь ставится само на
+      // КАЖДЫЙ новый пост (а не только один раз при первой постановке в
+      // воронку) — срок за день до даты поста. Трогаем только пустые поля:
+      // если в "Задаче" уже что-то вписано вручную (в т.ч. специально
+      // оставлено пустым при редактировании существующего поста), это не
+      // переписываем.
+      function defaultPing(row, rowIsNew){
+        if (!rowIsNew || !row.date) return;
+        if (!row.taskTitle) row.taskTitle = "Выйти на связь для контроля";
+        if (!row.taskDue){
+          var d = new Date(row.date+"T00:00:00");
+          if (!isNaN(d)){ d.setDate(d.getDate()-1); row.taskDue = d.toISOString().slice(0,10); }
+        }
+      }
+      defaultPing(mainRow, isNew);
+      extraRows.forEach(function(r){ defaultPing(r, true); });
       var postRef = isNew ? db.collection("posts").doc() : db.doc("posts/"+post.id);
       var body = {
         partnerId: selPid, partnerName: p? p.name : "", refCode: p? p.refCode : "",
