@@ -1906,14 +1906,14 @@ tbody tr:hover{background:var(--panel-2)}
         return !a || a===name;
       }).length;
     }
-    // Пинги ("Выйти на связь для контроля", автосозданные к посту —
-    // t.relatedPostId) — это отдельная категория, не обычная задача отдела:
-    // считаем их тут отдельной графой, а не в «Задачи отдела Influence»,
-    // и только незакрытые (открыта/в работе), привязанные к партнёру в
-    // этом режиме воронки.
+    // Пинги (t.isPing — и автосозданные к посту, и из «касания» через
+    // «Дата след. шага») — это отдельная категория, не обычная задача
+    // отдела: считаем их тут отдельной графой, а не в «Задачи отдела
+    // Influence», и только незакрытые (открыта/в работе), привязанные к
+    // партнёру в этом режиме воронки.
     function countPings(mode, name){
       return tasks.filter(function(t){
-        if (!t.relatedPostId || taskStatusOf(t)==="done") return false;
+        if (!(t.isPing || t.relatedPostId) || taskStatusOf(t)==="done") return false;
         if (t.assignee !== name) return false;
         var p = partners.find(function(x){ return x.id===t.partnerId; });
         return !!(p && p.funnel && p.funnel.mode===mode);
@@ -1946,10 +1946,10 @@ tbody tr:hover{background:var(--panel-2)}
   }
 
   function dashAssigneeStatusHtml(){
-    // Пинги к постам (t.relatedPostId) сюда не входят — для них своя графа
-    // в «Задачи по воронкам», чтобы не задваивать их в двух местах дашборда.
+    // Пинги (t.isPing) сюда не входят — для них своя графа в «Задачи по
+    // воронкам», чтобы не задваивать их в двух местах дашборда.
     function countsFor(name){
-      var list = tasks.filter(function(t){ return t.assignee === name && !t.relatedPostId; });
+      var list = tasks.filter(function(t){ return t.assignee === name && !(t.isPing || t.relatedPostId); });
       var out = {};
       TASK_STATUS.forEach(function(s){
         out[s.v] = list.filter(function(t){ return taskStatusOf(t) === s.v; }).length;
@@ -2925,7 +2925,7 @@ tbody tr:hover{background:var(--panel-2)}
         var taskBody = {
           title: taskTitle, kind:"partner", partnerId: selPid, partnerName: p? p.name : "",
           assignee: assignee || "", dueDate: mainRow.taskDue || date, relatedPostId: postRef.id,
-          updatedAt: new Date().toISOString()
+          isPing: true, updatedAt: new Date().toISOString()
         };
         var taskOp;
         if (post.taskId){
@@ -2961,7 +2961,7 @@ tbody tr:hover{background:var(--panel-2)}
               return taskRef.set({
                 title: w.row.taskTitle, kind:"partner", partnerId: selPid, partnerName: p? p.name : "",
                 assignee: assignee || "", dueDate: w.row.taskDue || w.row.date, relatedPostId: w.ref.id,
-                status:"open", createdAt:new Date().toISOString(), updatedAt:new Date().toISOString()
+                isPing: true, status:"open", createdAt:new Date().toISOString(), updatedAt:new Date().toISOString()
               }).then(function(){ return w.ref.update({taskId: taskRef.id}); });
             }));
           });
@@ -3038,7 +3038,7 @@ tbody tr:hover{background:var(--panel-2)}
           title: nextStep || "Выйти на связь для контроля",
           kind:"partner", partnerId:p.id, partnerName:p.name,
           assignee: (p.funnel && p.funnel.assignee) || "",
-          dueDate: nextStepDate, status:"open",
+          dueDate: nextStepDate, status:"open", isPing: true,
           createdAt:new Date().toISOString(), updatedAt:new Date().toISOString()
         });
       }).then(function(){ refreshData(); closeOverlay(); openPartnerDetail(p.id); })
