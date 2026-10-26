@@ -3389,21 +3389,15 @@ tbody tr:hover{background:var(--panel-2)}
       closeOverlay();
     });
   }
-  // Применяет решение по сегменту и затем решает судьбу воронки: архив/
-  // стоп — партнёр снимается с воронки; любой другой сегмент — запускаем
-  // новый круг (хантинг переключается в аккаунтинг, аккаунтинг начинает
-  // новый заход с первой стадии).
+  // Применяет решение по сегменту и снимает партнёра с воронки — независимо
+  // от того, присвоили категорию по метрикам или отправили в архив/стоп.
+  // (До 26.10 присвоение категории запускало новый круг воронки вместо
+  // снятия с неё — поменяли по явной просьбе: после «Оценки результата»
+  // партнёр должен полностью выходить из воронки.)
   function finishFunnelWithDecision(p, segUpdate){
     if (!db) return;
     var body = Object.assign({}, segUpdate);
-    var willArchive = (segUpdate.segment==="Архив" || segUpdate.segment==="Стоп");
-    if (willArchive){
-      body.funnel = null;
-    } else {
-      var nextMode = p.funnel.mode==="hunting" ? "accounting" : p.funnel.mode;
-      var now = new Date().toISOString();
-      body.funnel = {mode:nextMode, stage:FUNNEL_STAGES[0].v, assignee:p.funnel.assignee||"", startedAt:now, updatedAt:now};
-    }
+    body.funnel = null;
     db.doc("partners/"+p.id).update(body).then(refreshData).catch(function(){});
   }
   // Хантинг — это поиск НОВЫХ партнёров, поэтому там не ищем среди уже
