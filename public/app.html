@@ -1446,8 +1446,9 @@ tbody tr:hover{background:var(--panel-2)}
     var existing = currentWeeklyReportDoc();
     var draft = (existing && existing.draftText!=null) ? existing.draftText : weeklyReportDraftText(weekStart, weekEnd, label);
     var problems = (existing && existing.problems!=null) ? existing.problems : "";
-    var huntProcessed = (existing && existing.huntProcessed!=null) ? existing.huntProcessed : "";
-    var acctProcessed = (existing && existing.acctProcessed!=null) ? existing.acctProcessed : "";
+    var autoCounts = weekFunnelCompletions(weekStart, weekEnd);
+    var huntProcessed = (existing && existing.huntProcessed!=null) ? existing.huntProcessed : autoCounts.hunt;
+    var acctProcessed = (existing && existing.acctProcessed!=null) ? existing.acctProcessed : autoCounts.acct;
     var savedHtml = existing && existing.updatedAt
       ? '<span style="color:var(--muted);font-size:12px">Сохранено: '+esc(fmtDateTime(existing.updatedAt))+'</span>'
       : '<span style="color:var(--muted);font-size:12px">Черновик не сохранён</span>';
@@ -1471,7 +1472,7 @@ tbody tr:hover{background:var(--panel-2)}
           '<div class="field" style="margin-bottom:0"><label>Отработано из хантинга (чел.)</label><input type="number" id="wrHuntProcessed" value="'+esc(huntProcessed)+'" '+(canWrite?'':'disabled')+'></div>'+
           '<div class="field" style="margin-bottom:0"><label>Отработано из аккаунтинга (партнёров)</label><input type="number" id="wrAcctProcessed" value="'+esc(acctProcessed)+'" '+(canWrite?'':'disabled')+'></div>'+
         '</div>'+
-        '<div style="color:var(--muted);font-size:11.5px;margin-bottom:10px">Эти две цифры копятся по неделям в гистограмму «Хантинг vs Аккаунтинг» на вкладке «Аналитика».</div>'+
+        '<div style="color:var(--muted);font-size:11.5px;margin-bottom:10px">Подставлено автоматически — считается по тому, сколько партнёров завершили воронку хантинга/аккаунтинга за эту неделю (кнопка «Завершить воронку» на карточке). Можно поправить руками, если нужно. Эти две цифры копятся по неделям в гистограмму «Хантинг vs Аккаунтинг» на вкладке «Аналитика».</div>'+
         '<textarea id="wrDraftText" style="width:100%;min-height:380px;font-family:var(--font-mono);font-size:12.5px;line-height:1.5" '+(canWrite?'':'disabled')+'>'+esc(draft)+'</textarea>'+
         '<div style="color:var(--muted);font-size:11.5px;margin-top:6px">«В продакшене» и «Опубликовано за неделю» подставлены автоматически из карточек партнёров (воронка аккаунтинга, этап «Ожидание контента») и календаря постов за выбранную неделю. Остальное — хантинг, спец-задачи, фокус — впишите сами, текст свободно редактируется.</div>'+
       '</div>'+
@@ -1496,6 +1497,9 @@ tbody tr:hover{background:var(--panel-2)}
     var regenBtn = document.getElementById("wrRegenBtn");
     if (regenBtn) regenBtn.addEventListener("click", function(){
       document.getElementById("wrDraftText").value = weeklyReportDraftText(weekStart, weekEnd, label);
+      var recount = weekFunnelCompletions(weekStart, weekEnd);
+      document.getElementById("wrHuntProcessed").value = recount.hunt;
+      document.getElementById("wrAcctProcessed").value = recount.acct;
     });
     var saveBtn = document.getElementById("wrSaveBtn");
     if (saveBtn) saveBtn.addEventListener("click", function(){
@@ -3397,8 +3401,33 @@ tbody tr:hover{background:var(--panel-2)}
   function finishFunnelWithDecision(p, segUpdate){
     if (!db) return;
     var body = Object.assign({}, segUpdate);
+    var now = new Date().toISOString();
+    // Лог завершений воронки — нужен, чтобы «Отработано из хантинга/
+    // аккаунтинга» в недельной рефлексии считалось само, а не вписывалось
+    // руками: сам funnel обнуляется и информация о том, что партнёр вообще
+    // проходил воронку, иначе терялась бы безвозвратно.
+    if (p.funnel && p.funnel.mode){
+      body.funnelLog = (p.funnelLog||[]).concat([{mode:p.funnel.mode, completedAt:now}]).slice(-50);
+    }
     body.funnel = null;
     db.doc("partners/"+p.id).update(body).then(refreshData).catch(function(){});
+  }
+  // Сколько партнёров завершили хантинг/аккаунтинг за период [weekStart,
+  // weekEnd] (обе даты включительно, формат YYYY-MM-DD) — считается по
+  // funnelLog, который пишется в finishFunnelWithDecision. Не ловит те
+  // завершения, что были ДО того, как funnelLog появился (26.10.26) — для
+  // них просто нет записи, восстановить нечем.
+  function weekFunnelCompletions(weekStart, weekEnd){
+    var hunt = 0, acct = 0;
+    partners.forEach(function(p){
+      (p.funnelLog||[]).forEach(function(entry){
+        var d = (entry.completedAt||"").slice(0,10);
+        if (d < weekStart || d > weekEnd) return;
+        if (entry.mode === "hunting") hunt++;
+        else if (entry.mode === "accounting") acct++;
+      });
+    });
+    return {hunt:hunt, acct:acct};
   }
   // Хантинг — это поиск НОВЫХ партнёров, поэтому там не ищем среди уже
   // существующих, а сразу открываем мини-анкету на создание карточки
