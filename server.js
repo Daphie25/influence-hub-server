@@ -194,6 +194,29 @@ function handleApi(req, res, parsed, authed) {
     return;
   }
 
+  // One-off manual trigger for the seed-data.json import, for the case where
+  // store.json already existed on the disk (e.g. an empty {} written by an
+  // earlier boot) when seed-data.json was added, so the automatic "no
+  // store.json yet" import at startup didn't fire. Safety: only runs when
+  // the live store is currently empty across every collection, so it can
+  // never clobber real data entered after the prototype went live. Visit
+  // this URL once, logged in, right after the deploy that added seed-data.json.
+  if (pathname === "/api/admin/reseed" && req.method === "GET") {
+    const totalDocs = Object.keys(store).reduce(function (n, c) { return n + Object.keys(store[c]).length; }, 0);
+    if (totalDocs > 0) {
+      sendJson(res, 409, { error: "store_not_empty", totalDocs: totalDocs, message: "Store already has data — refusing to overwrite. Delete this route's use once you've confirmed the data you expect is present." });
+      return;
+    }
+    if (!fs.existsSync(SEED_FILE)) {
+      sendJson(res, 404, { error: "no_seed_file" });
+      return;
+    }
+    store = loadJson(SEED_FILE, {});
+    persistStore();
+    sendJson(res, 200, { ok: true, imported: Object.keys(store).reduce(function (o, c) { o[c] = Object.keys(store[c]).length; return o; }, {}) });
+    return;
+  }
+
   if (pathname === "/api/list" && req.method === "GET") {
     const q = parsed.query;
     const rows = listCollection(q.collection || "", { orderBy: q.orderBy, dir: q.dir, limit: q.limit ? parseInt(q.limit, 10) : null });
