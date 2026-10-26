@@ -193,24 +193,6 @@ function handleApi(req, res, parsed, authed) {
     sendJson(res, 200, { ok: true });
     return;
   }
-
-  // Temporary admin helper: wipe every document in the given collection(s)
-  // (?collections=tasks,posts). Session-authenticated, same as everything
-  // else here. Meant to be used once for a deliberate reset, then removed
-  // from the code again — not left as a standing feature.
-  if (pathname === "/api/admin/clear" && req.method === "GET") {
-    const names = (parsed.query.collections || "").split(",").map(function (s) { return s.trim(); }).filter(Boolean);
-    if (!names.length) { sendJson(res, 400, { error: "missing_collections" }); return; }
-    const cleared = {};
-    names.forEach(function (name) {
-      cleared[name] = Object.keys(col(name)).length;
-      store[name] = {};
-    });
-    persistStore();
-    sendJson(res, 200, { ok: true, cleared: cleared });
-    return;
-  }
-
   if (pathname === "/api/list" && req.method === "GET") {
     const q = parsed.query;
     const rows = listCollection(q.collection || "", { orderBy: q.orderBy, dir: q.dir, limit: q.limit ? parseInt(q.limit, 10) : null });
