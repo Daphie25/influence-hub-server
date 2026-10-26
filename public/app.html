@@ -264,6 +264,10 @@ tbody tr:hover{background:var(--panel-2)}
         <h3>Задачи отдела Influence</h3>
         <div id="dashTasks"></div>
       </div>
+      <div class="card">
+        <h3>Задачи по воронкам</h3>
+        <div id="dashFunnelTasks"></div>
+      </div>
     </section>
 
     <section class="view" id="view-partners">
@@ -1866,7 +1870,45 @@ tbody tr:hover{background:var(--panel-2)}
     var dt = document.getElementById("dashTasks");
     dt.innerHTML = dashAssigneeStatusHtml();
 
+    var dft = document.getElementById("dashFunnelTasks");
+    if (dft) dft.innerHTML = dashFunnelTaskStatusHtml();
+
     renderSupersetKpis();
+  }
+
+  // Задачи, привязанные к партнёру ("По партнёру"), относим к той воронке,
+  // в которой партнёр находится ПРЯМО СЕЙЧАС (p.funnel.mode). Задачи отдела
+  // ("Задача отдела", без партнёра) и задачи по партнёрам, которые сейчас не
+  // в воронке, в этот разрез не попадают — это специально про текущую
+  // загрузку по хантингу и аккаунтингу, а не про все задачи подряд.
+  function dashFunnelTaskStatusHtml(){
+    function countsForMode(mode){
+      var list = tasks.filter(function(t){
+        if (t.kind !== "partner" || !t.partnerId) return false;
+        var p = partners.find(function(x){ return x.id === t.partnerId; });
+        return !!(p && p.funnel && p.funnel.mode === mode);
+      });
+      var out = {};
+      TASK_STATUS.forEach(function(s){
+        out[s.v] = list.filter(function(t){ return taskStatusOf(t) === s.v; }).length;
+      });
+      return out;
+    }
+    var groups = [
+      {mode:"hunting", label:"Задачи Influence Хантинг"},
+      {mode:"accounting", label:"Задачи Influence Аккаунтинг"}
+    ];
+    return groups.map(function(g, i){
+      var c = countsForMode(g.mode);
+      return '<div style="margin-bottom:'+(i<groups.length-1?"12px":"0")+';'+(i<groups.length-1?"padding-bottom:12px;border-bottom:1px solid var(--border)":"")+'">'+
+        '<div style="font-weight:600;font-size:13px;margin-bottom:6px">'+esc(g.label)+'</div>'+
+        '<div style="display:flex;gap:14px;font-size:12.5px">'+
+          TASK_STATUS.map(function(s){
+            return '<span><span class="chip '+s.chip+'" style="margin-right:5px">'+esc(s.label)+'</span>'+(c[s.v]||0)+'</span>';
+          }).join("")+
+        '</div>'+
+      '</div>';
+    }).join("");
   }
 
   function dashAssigneeStatusHtml(){
