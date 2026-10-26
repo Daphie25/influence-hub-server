@@ -1882,34 +1882,52 @@ tbody tr:hover{background:var(--panel-2)}
   // в воронке, в этот разрез не попадают — это специально про текущую
   // загрузку по хантингу и аккаунтингу, а не про все задачи подряд.
   // Таблица «Задачи по воронкам»: строки — стадии воронки (общий набор
-  // для обоих режимов, см. FUNNEL_STAGES), столбцы — Хантинг/Аккаунтинг.
+  // для обоих режимов, см. FUNNEL_STAGES), столбцы — Хантинг/Аккаунтинг,
+  // а внутри каждого режима — ещё разбивка по Данил Lead / Данил Mng.
   // Считаем партнёров, которые СЕЙЧАС находятся в этой стадии этой воронки
-  // (p.funnel.mode + p.funnel.stage), а не статусы отдельных задач.
+  // и закреплены за этим человеком (p.funnel.mode + stage + assignee),
+  // а не статусы отдельных задач.
   function dashFunnelTaskStatusHtml(){
-    function countsForMode(mode){
+    var people = [ROLE_ASSIGNEES.lead, ROLE_ASSIGNEES.mng];
+    function countsForModePerson(mode, name){
       var out = {};
       FUNNEL_STAGES.forEach(function(s){
         out[s.v] = partners.filter(function(p){
-          return !!(p.funnel && p.funnel.mode===mode && p.funnel.stage===s.v);
+          return !!(p.funnel && p.funnel.mode===mode && p.funnel.stage===s.v && p.funnel.assignee===name);
         }).length;
       });
       return out;
     }
-    var hunt = countsForMode("hunting");
-    var acct = countsForMode("accounting");
+    var modes = ["hunting","accounting"];
+    var counts = {}; // counts[mode][personIdx] = {stageV: n}
+    modes.forEach(function(mode){
+      counts[mode] = people.map(function(name){ return countsForModePerson(mode, name); });
+    });
     var rows = FUNNEL_STAGES.map(function(s){
+      var cells = modes.map(function(mode){
+        return people.map(function(name, i){
+          return '<td style="padding:7px 10px;text-align:center" class="mono">'+(counts[mode][i][s.v]||0)+'</td>';
+        }).join("");
+      }).join("");
       return '<tr style="border-top:1px solid var(--border)">'+
         '<td style="padding:7px 10px 7px 0;color:var(--muted)">'+esc(s.label)+'</td>'+
-        '<td style="padding:7px 10px;text-align:center" class="mono">'+(hunt[s.v]||0)+'</td>'+
-        '<td style="padding:7px 0 7px 10px;text-align:center" class="mono">'+(acct[s.v]||0)+'</td>'+
+        cells+
       '</tr>';
     }).join("");
+    var personHeaderCells = modes.map(function(){
+      return people.map(function(name){
+        return '<th style="text-align:center;padding:0 10px 6px;font-weight:500;color:var(--muted)">'+esc(name.replace("Данил ",""))+'</th>';
+      }).join("");
+    }).join("");
     return '<table style="width:100%;border-collapse:collapse;font-size:12.5px">'+
-      '<thead><tr>'+
-        '<th style="text-align:left;padding:0 10px 6px 0;color:var(--muted);font-weight:500">Стадия</th>'+
-        '<th style="text-align:center;padding:0 10px 6px;font-weight:600">Хантинг</th>'+
-        '<th style="text-align:center;padding:0 0 6px 10px;font-weight:600">Аккаунтинг</th>'+
-      '</tr></thead>'+
+      '<thead>'+
+        '<tr>'+
+          '<th rowspan="2" style="text-align:left;padding:0 10px 6px 0;color:var(--muted);font-weight:500;vertical-align:bottom">Стадия</th>'+
+          '<th colspan="'+people.length+'" style="text-align:center;padding:0 10px 4px;font-weight:600;border-bottom:1px solid var(--border)">Хантинг</th>'+
+          '<th colspan="'+people.length+'" style="text-align:center;padding:0 10px 4px;font-weight:600;border-bottom:1px solid var(--border)">Аккаунтинг</th>'+
+        '</tr>'+
+        '<tr>'+personHeaderCells+'</tr>'+
+      '</thead>'+
       '<tbody>'+rows+'</tbody>'+
     '</table>';
   }
