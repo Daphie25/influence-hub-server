@@ -2804,6 +2804,15 @@ tbody tr:hover{background:var(--panel-2)}
       if (!date){ document.getElementById("pstDate").focus(); return; }
       var p = partners.find(function(x){ return x.id===selPid; });
       var assignee = document.getElementById("pstAssignee").value;
+      // Ответственный на посте — это и есть источник правды для того, кто
+      // ведёт партнёра в аккаунтинг-воронке: не нужно выбирать его ещё раз
+      // отдельно на доске воронки, он сам подтягивается при каждом
+      // сохранении поста (пока партнёр в аккаунтинге).
+      if (p && p.funnel && p.funnel.mode==="accounting" && assignee && p.funnel.assignee!==assignee){
+        db.doc("partners/"+selPid).update({
+          funnel: Object.assign({}, p.funnel, {assignee:assignee, updatedAt:new Date().toISOString()})
+        }).catch(function(){});
+      }
       var mainRow = {
         date: date, contentType: document.getElementById("pstType").value,
         status: document.getElementById("pstStatus").value || "planned",
