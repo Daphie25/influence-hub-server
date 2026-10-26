@@ -1895,9 +1895,15 @@ tbody tr:hover{background:var(--panel-2)}
   // (p.funnel.mode + stage + assignee), а не статусы отдельных задач.
   function dashFunnelTaskStatusHtml(){
     var people = [ROLE_ASSIGNEES.lead, ROLE_ASSIGNEES.mng];
+    // Партнёр без проставленного ответственного (funnel.assignee пустой)
+    // считается у обоих — ровно так же, как сама доска воронки показывает
+    // «ничейных» партнёров в обеих вкладках Lead/Mng (см. renderFunnelView,
+    // фильтр "!a || a===wanted"), а не теряет их из виду.
     function countFor(mode, name, stageV){
       return partners.filter(function(p){
-        return !!(p.funnel && p.funnel.mode===mode && p.funnel.stage===stageV && p.funnel.assignee===name);
+        if (!(p.funnel && p.funnel.mode===mode && p.funnel.stage===stageV)) return false;
+        var a = p.funnel.assignee;
+        return !a || a===name;
       }).length;
     }
     function miniTable(mode, label, chipCls){
