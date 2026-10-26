@@ -4255,6 +4255,10 @@ tbody tr:hover{background:var(--panel-2)}
       (!isNew? '<div class="field"><label>Статус</label><select id="taStatus">'+
           TASK_STATUS.map(function(s){ return '<option value="'+s.v+'" '+(taskStatusOf(t)===s.v?"selected":"")+'>'+esc(s.label)+'</option>'; }).join("")+
         '</select></div>' : "")+
+      '<div class="field"><label style="display:flex;align-items:center;gap:6px;font-weight:400">'+
+        '<input type="checkbox" id="taIsPing" '+(t.isPing?"checked":"")+' style="width:auto"> '+
+        'Это пинг (не входит в «Задачи отдела Influence» на дашборде, считается в графе «Пинги»)'+
+      '</label></div>'+
       '<div style="display:flex;gap:8px;margin-top:10px">'+
         '<button class="btn btn-accent" id="saveTask">Сохранить</button>'+
         '<button class="btn btn-ghost" id="cancelTask">Отмена</button>'+
@@ -4273,6 +4277,7 @@ tbody tr:hover{background:var(--panel-2)}
       var body = {
         title:title, kind:kindVal, description: str("taDescription"),
         assignee:str("taAssignee"), dueDate:str("taDue"),
+        isPing: document.getElementById("taIsPing").checked,
         updatedAt:new Date().toISOString()
       };
       if (isNew){ body.status = "open"; body.createdAt = new Date().toISOString(); }
