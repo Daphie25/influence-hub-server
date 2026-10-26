@@ -1906,11 +1906,25 @@ tbody tr:hover{background:var(--panel-2)}
         return !a || a===name;
       }).length;
     }
+    // Пинги ("Выйти на связь для контроля", автосозданные к посту —
+    // t.relatedPostId) — это отдельная категория, не обычная задача отдела:
+    // считаем их тут отдельной графой, а не в «Задачи отдела Influence»,
+    // и только незакрытые (открыта/в работе), привязанные к партнёру в
+    // этом режиме воронки.
+    function countPings(mode, name){
+      return tasks.filter(function(t){
+        if (!t.relatedPostId || taskStatusOf(t)==="done") return false;
+        if (t.assignee !== name) return false;
+        var p = partners.find(function(x){ return x.id===t.partnerId; });
+        return !!(p && p.funnel && p.funnel.mode===mode);
+      }).length;
+    }
     function miniTable(mode, label, chipCls){
       var head = '<th style="text-align:left;padding:0 8px 6px 0;color:var(--muted);font-weight:500"></th>'+
         FUNNEL_STAGES.map(function(s){
           return '<th style="text-align:center;padding:0 8px 6px;font-weight:500;color:var(--muted)">'+esc(s.label)+'</th>';
-        }).join("");
+        }).join("")+
+        '<th style="text-align:center;padding:0 0 6px 8px;font-weight:500;color:var(--muted);border-left:1px solid var(--border)">Пинги</th>';
       var rows = people.map(function(name){
         var cells = FUNNEL_STAGES.map(function(s){
           return '<td style="padding:6px 8px;text-align:center" class="mono">'+countFor(mode, name, s.v)+'</td>';
@@ -1918,6 +1932,7 @@ tbody tr:hover{background:var(--panel-2)}
         return '<tr style="border-top:1px solid var(--border)">'+
           '<td style="padding:6px 0;white-space:nowrap">'+esc(name)+'</td>'+
           cells+
+          '<td style="padding:6px 8px;text-align:center;border-left:1px solid var(--border)" class="mono">'+countPings(mode, name)+'</td>'+
         '</tr>';
       }).join("");
       return '<div class="chip '+chipCls+'" style="margin-bottom:8px;font-size:12px">'+esc(label)+'</div>'+
@@ -1931,8 +1946,10 @@ tbody tr:hover{background:var(--panel-2)}
   }
 
   function dashAssigneeStatusHtml(){
+    // Пинги к постам (t.relatedPostId) сюда не входят — для них своя графа
+    // в «Задачи по воронкам», чтобы не задваивать их в двух местах дашборда.
     function countsFor(name){
-      var list = tasks.filter(function(t){ return t.assignee === name; });
+      var list = tasks.filter(function(t){ return t.assignee === name && !t.relatedPostId; });
       var out = {};
       TASK_STATUS.forEach(function(s){
         out[s.v] = list.filter(function(t){ return taskStatusOf(t) === s.v; }).length;
