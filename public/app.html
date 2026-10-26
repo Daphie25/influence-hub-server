@@ -261,7 +261,7 @@ tbody tr:hover{background:var(--panel-2)}
         <div id="statusBreakdown"></div>
       </div>
       <div class="card">
-        <h3>Ближайшие задачи</h3>
+        <h3>Задачи отдела Influence</h3>
         <div id="dashTasks"></div>
       </div>
     </section>
@@ -1864,12 +1864,32 @@ tbody tr:hover{background:var(--panel-2)}
     }
 
     var dt = document.getElementById("dashTasks");
-    var upcoming = openTasks.slice().sort(function(a,b){return (a.dueDate||"9999")<(b.dueDate||"9999")?-1:1;}).slice(0,6);
-    dt.innerHTML = upcoming.length ? upcoming.map(taskRowHtml).join("") :
-      emptyState("Нет открытых задач", "Задачи отдела и шаги по партнёрам будут показаны здесь.");
-    wireTaskRows(dt);
+    dt.innerHTML = dashAssigneeStatusHtml();
 
     renderSupersetKpis();
+  }
+
+  function dashAssigneeStatusHtml(){
+    function countsFor(name){
+      var list = tasks.filter(function(t){ return t.assignee === name; });
+      var out = {};
+      TASK_STATUS.forEach(function(s){
+        out[s.v] = list.filter(function(t){ return taskStatusOf(t) === s.v; }).length;
+      });
+      return out;
+    }
+    var people = [ROLE_ASSIGNEES.lead, ROLE_ASSIGNEES.mng];
+    return people.map(function(name){
+      var c = countsFor(name);
+      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">'+
+        '<span style="font-weight:600;font-size:13px">'+esc(name)+'</span>'+
+        '<div style="display:flex;gap:14px;font-size:12.5px">'+
+          TASK_STATUS.map(function(s){
+            return '<span><span class="chip '+s.chip+'" style="margin-right:5px">'+esc(s.label)+'</span>'+(c[s.v]||0)+'</span>';
+          }).join("")+
+        '</div>'+
+      '</div>';
+    }).join("");
   }
 
   function kpiTile(n, label, cls, mono){
