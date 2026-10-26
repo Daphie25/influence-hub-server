@@ -1,0 +1,13 @@
+{
+  "name": "influence-hub-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted Influence Hub: zero-dependency Node.js server (http + fs only) replacing the Claude Artifact db/user/assets capabilities with a tiny JSON-file-backed REST API.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

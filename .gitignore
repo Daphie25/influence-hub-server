@@ -1,0 +1,5 @@
+node_modules/
+data/store.json
+data/uploads-index.json
+data/uploads/*
+!data/uploads/.gitkeep
