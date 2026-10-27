@@ -704,13 +704,25 @@ tbody tr:hover{background:var(--panel-2)}
   // — то есть ровно то, что отдаёт Superset dataset partner_top (поле
   // "partner" сопоставляется с refCode/именем партнёра).
   //
+  // ВАЖНО (2026-10-27): row.paying_users/row.paying_pct из Superset — это
+  // "сколько пользователей КОГДА-ЛИБО заплатили комиссию", а не "активен ли
+  // трейдер сейчас". Поля users/payingUsers/payingPct (в metricsHistory) и
+  // activeTraders/conversion (в p.metrics) по всей системе означают именно
+  // "активен сейчас" и заполняются ОТДЕЛЬНЫМ процессом из Grafana
+  // (users_with_active_bot) — раньше их по ошибке затирало этим импортом,
+  // откуда и взялась неверная метрика активных трейдеров. Этот импорт
+  // трогает только то, чего в Grafana нет: turnover90d/medianPerPaying/
+  // medianLifetimeDays (в снимке) и paidToUs (в p.metrics). Если на текущую
+  // неделю уже есть снимок (от Grafana-процесса) — его users/payingUsers/
+  // payingPct сохраняются как есть; если снимка ещё нет — эти поля остаются
+  // null до прогона Grafana-процесса за эту неделю.
+  //
   // Один импорт обновляет всё одним действием, без ручного открытия карточки
-  // партнёра: пишет снимок в metricsHistory (momentum×quality×вес) и
-  // протягивает paid_us_total/paying_users/paying_pct в те же самые
-  // p.metrics.paidToUs/activeTraders/conversion, что раньше заполнялись
-  // только руками (нужны отчётам — reportTopPartnersHtml и т.п.). Саму
-  // лестницу двигает recomputeHealthSignals() (единое место для этого,
-  // см. выше), вызываемый сразу после записи.
+  // партнёра: дополняет снимок в metricsHistory (momentum×quality×вес) и
+  // протягивает paid_us_total в p.metrics.paidToUs (нужен отчётам —
+  // reportTopPartnersHtml и т.п.). Саму лестницу двигает
+  // recomputeHealthSignals() (единое место для этого, см. выше), вызываемый
+  // сразу после записи.
   function parseMetricsImport(text){
     var data;
     try { data = JSON.parse(text); } catch(e){ throw new Error("Не удалось разобрать JSON: "+e.message); }
@@ -723,12 +735,14 @@ tbody tr:hover{background:var(--panel-2)}
     rows.forEach(function(row){
       var p = findPartnerByCode(row.partner || row.ref_code || row.refCode);
       if (!p){ unmatched.push(row.partner || row.ref_code || "?"); return; }
+      var existingSnap = (p.metricsHistory || []).filter(function(s){ return s.week === week; })[0] || {};
       var snap = {
         week: week,
         capturedAt: new Date().toISOString(),
-        users: row.users!=null ? +row.users : null,
-        payingUsers: row.paying_users!=null ? +row.paying_users : null,
-        payingPct: row.paying_pct!=null ? +row.paying_pct : null,
+        // users/payingUsers/payingPct — собственность Grafana-процесса, не трогаем
+        users: existingSnap.users != null ? existingSnap.users : null,
+        payingUsers: existingSnap.payingUsers != null ? existingSnap.payingUsers : null,
+        payingPct: existingSnap.payingPct != null ? existingSnap.payingPct : null,
         turnover90d: row.turnover_90d!=null ? +row.turnover_90d : null,
         medianPerPaying: row.median_per_paying!=null ? +row.median_per_paying : null,
         medianLifetimeDays: row.median_lifetime_days!=null ? +row.median_lifetime_days : null
@@ -736,9 +750,9 @@ tbody tr:hover{background:var(--panel-2)}
       var newHistory = appendMetricsSnapshot(p.metricsHistory, snap);
       var oldMetrics = p.metrics || {};
       var newMetrics = Object.assign({}, oldMetrics, {
-        paidToUs: row.paid_us_total!=null ? +row.paid_us_total : oldMetrics.paidToUs,
-        activeTraders: row.paying_users!=null ? +row.paying_users : oldMetrics.activeTraders,
-        conversion: row.paying_pct!=null ? +row.paying_pct : oldMetrics.conversion
+        paidToUs: row.paid_us_total!=null ? +row.paid_us_total : oldMetrics.paidToUs
+        // activeTraders/conversion больше НЕ трогаем здесь — их обновляет
+        // только Grafana-процесс (см. комментарий выше).
       });
       matched.push({p:p, newHistory:newHistory, newMetrics:newMetrics});
     });
@@ -759,7 +773,7 @@ tbody tr:hover{background:var(--panel-2)}
       '<h2 style="margin:0 0 10px">Импорт метрик за неделю</h2>'+
       '<div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Вставьте JSON-массив из Superset (dataset partner_top) — сопоставление идёт по полю <span class="mono">partner</span> с реф-кодом или именем. Текущая неделя: <span class="mono">'+esc(weekKeyNow())+'</span></div>'+
       '<textarea id="metricsImportText" rows="10" style="width:100%;font-family:var(--font-mono);font-size:12px" placeholder=\'[{"partner":"nextbot","users":62,"paying_users":42,"paying_pct":67.7,"turnover_90d":157198.87,"median_per_paying":2.88,"median_lifetime_days":48,"paid_us_total":1234.56}]\'></textarea>'+
-      '<div style="font-size:11.5px;color:var(--muted);margin-top:4px">Этот же импорт двигает и старую лестницу (Здоровый/Дожать A/B) — <span class="mono">paid_us_total</span> и <span class="mono">paying_users</span>/<span class="mono">paying_pct</span> уходят в те же поля, что раньше заполнялись руками.</div>'+
+      '<div style="font-size:11.5px;color:var(--muted);margin-top:4px"><span class="mono">paying_users</span>/<span class="mono">paying_pct</span> из вставки игнорируются — активность трейдеров берётся только из Grafana. Этот импорт обновляет лишь <span class="mono">turnover_90d</span>/<span class="mono">median_per_paying</span>/<span class="mono">median_lifetime_days</span> в истории и <span class="mono">paid_us_total</span> в карточке партнёра.</div>'+
       '<div id="metricsImportStatus" style="font-size:12.5px;margin-top:8px"></div>'+
       '<div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">'+
         '<button class="btn btn-ghost btn-sm" id="metricsImportCancel">Отмена</button>'+
