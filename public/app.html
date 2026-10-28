@@ -1213,8 +1213,17 @@ tbody tr:hover{background:var(--panel-2)}
       var mk = x.date.slice(0,7);
       if (!byMonth[mk]) byMonth[mk] = {spent:0, reach:0, count:0, byType:{}};
       var b = byMonth[mk];
-      b.spent += (x.price||0); b.reach += (x.reach||0); b.count += 1;
+      b.reach += (x.reach||0); b.count += 1;
       var k = x.contentType || "Без типа"; b.byType[k] = (b.byType[k]||0)+1;
+    });
+    // "Потрачено" считаем по месяцу РАЗМЕЩЕНИЯ (дата создания поста в
+    // системе), а не по месяцу выхода — оплата проходит в момент
+    // размещения, даже если пост запланирован на будущий месяц.
+    posts.forEach(function(x){
+      if (!x.createdAt) return;
+      var mk = x.createdAt.slice(0,7);
+      if (!byMonth[mk]) byMonth[mk] = {spent:0, reach:0, count:0, byType:{}};
+      byMonth[mk].spent += (x.price||0);
     });
     var months = Object.keys(byMonth).sort().reverse().slice(0,6);
     if (!months.length) return '<div style="color:var(--muted);font-size:12.5px">Постов в календаре пока нет.</div>';
@@ -2410,7 +2419,12 @@ tbody tr:hover{background:var(--panel-2)}
     var daysInMonth = new Date(y, m, 0).getDate();
     var rangeLabel = "01."+pad2(m)+"-"+pad2(daysInMonth)+"."+pad2(m);
     var monthPosts = posts.filter(function(x){ return x.date && x.date.slice(0,7)===calMonth; });
-    var spent = monthPosts.reduce(function(s,x){ return s + (x.price||0); }, 0);
+    // "Потрачено" считаем по месяцу РАЗМЕЩЕНИЯ (дата создания поста в
+    // системе), а не по месяцу выхода: оплата проходит в момент размещения,
+    // даже если пост запланирован на будущий месяц. Охваты/счётчики ниже
+    // остаются привязаны к месяцу выхода.
+    var spentPosts = posts.filter(function(x){ return x.createdAt && x.createdAt.slice(0,7)===calMonth; });
+    var spent = spentPosts.reduce(function(s,x){ return s + (x.price||0); }, 0);
     var reach = monthPosts.reduce(function(s,x){ return s + (x.reach||0); }, 0);
     var planned = monthPosts.filter(function(x){ return x.status==="planned"; }).length;
     var published = monthPosts.filter(function(x){ return x.status==="published"; }).length;
