@@ -937,6 +937,19 @@ tbody tr:hover{background:var(--panel-2)}
   function fmtPct(n){ if(n==null||n==="") return "—"; var num=Number(n); if(isNaN(num)) return "—"; return (num>0?"+":"")+num+"%"; }
   function fmtDate(s){ if(!s) return "—"; var d=new Date(s+"T00:00:00"); if(isNaN(d)) return s; return d.toLocaleDateString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric"}); }
   function today(){ return new Date().toISOString().slice(0,10); }
+  // Прибавляет/вычитает N дней к дате-строке YYYY-MM-DD, не трогая часовой
+  // пояс браузера: Date.UTC + setUTCDate/toISOString работают только в UTC,
+  // поэтому "день до" не сдвигается на лишний день для пользователей восточнее
+  // UTC (например, Томск, UTC+7) — там обычный new Date(str+"T00:00:00") с
+  // .setDate()/.toISOString() даёт сдвиг на 2 дня вместо 1 (локальная полночь
+  // переводится в предыдущий день UTC, и конвертация назад теряет день).
+  function addDaysToDateStr(dateStr, n){
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr||"");
+    if (!m) return dateStr;
+    var d = new Date(Date.UTC(+m[1], +m[2]-1, +m[3]));
+    d.setUTCDate(d.getUTCDate()+n);
+    return d.toISOString().slice(0,10);
+  }
   function uid(){ return Math.random().toString(36).slice(2,10); }
 
   // ---------- state ----------
@@ -2701,10 +2714,7 @@ tbody tr:hover{background:var(--panel-2)}
     var dateEl = document.getElementById(dateId), titleEl = document.getElementById(titleId), dueEl = document.getElementById(dueId);
     if (!dateEl || !titleEl || !dueEl || !dateEl.value) return;
     if (!titleEl.value) titleEl.value = "Выйти на связь для контроля";
-    if (!dueEl.value){
-      var d = new Date(dateEl.value+"T00:00:00");
-      if (!isNaN(d)){ d.setDate(d.getDate()-1); dueEl.value = d.toISOString().slice(0,10); }
-    }
+    if (!dueEl.value) dueEl.value = addDaysToDateStr(dateEl.value, -1);
   }
   // ---------- автосохранение форм (карточка партнёра, пост) ----------
   // Поля сохраняются сразу по вводу — больше не нужно листать форму вниз и
@@ -2896,6 +2906,31 @@ tbody tr:hover{background:var(--panel-2)}
     var savedPostId = isNew ? null : post.id;
     var linkedTaskId = post.taskId || null;
     var postAutosaveStatusEl = document.getElementById("postAutosaveStatus");
+    // Дефолтный пинг ("Выйти на связь...", срок — за день до поста) для
+    // НОВОГО поста должен следовать за датой, пока её меняют (а дата поста
+    // на автосохранении часто меняется ПОСЛЕ того, как пост уже создан —
+    // например, партнёра выбрали раньше, чем проставили нужное число).
+    // Раньше дефолт подставлялся один раз на первом автосохранении и потом
+    // замораживался — если дата поста после этого менялась (например, на
+    // задний число), срок задачи оставался привязан к старой дате. Теперь
+    // пересчитываем на каждом автосохранении, пока поля задачи не тронуты
+    // руками (тогда авто-обновление для этого конкретного поля отключается).
+    var pingAutoTitle = false, pingAutoDue = false;
+    (function(){
+      var tTitleEl = document.getElementById("pstTaskTitle");
+      var tDueEl = document.getElementById("pstTaskDue");
+      if (tTitleEl) tTitleEl.addEventListener("input", function(){ pingAutoTitle = false; });
+      if (tDueEl) tDueEl.addEventListener("input", function(){ pingAutoDue = false; });
+    })();
+    function refreshPingDefaultsIfNew(){
+      if (!isNew) return; // для уже существующего поста дефолты не трогаем
+      var dateEl = document.getElementById("pstDate");
+      var titleEl = document.getElementById("pstTaskTitle");
+      var dueEl = document.getElementById("pstTaskDue");
+      if (!dateEl || !titleEl || !dueEl || !dateEl.value) return;
+      if (!titleEl.value || pingAutoTitle){ titleEl.value = "Выйти на связь для контроля"; pingAutoTitle = true; }
+      if (!dueEl.value || pingAutoDue){ dueEl.value = addDaysToDateStr(dateEl.value, -1); pingAutoDue = true; }
+    }
     function buildMainPostBody(){
       var selPid = document.getElementById("pstPartner").value;
       var date = document.getElementById("pstDate").value;
@@ -2935,10 +2970,7 @@ tbody tr:hover{background:var(--panel-2)}
       var selPid = pidEl.value, date = dateEl.value;
       if (!selPid || !date){ setAutosaveStatus(postAutosaveStatusEl, ""); return Promise.resolve(); }
       var isFirstSave = !savedPostId;
-      // Как и раньше: пинг-задача на новый пост подставляется дефолтом,
-      // если текст/срок ещё не заполнены вручную — только при первом
-      // сохранении (для уже существующего поста это не трогаем).
-      if (isFirstSave) fillPingDefaults("pstDate","pstTaskTitle","pstTaskDue");
+      refreshPingDefaultsIfNew();
       var body = buildMainPostBody();
       setAutosaveStatus(postAutosaveStatusEl, "saving");
       var op;
@@ -2997,10 +3029,7 @@ tbody tr:hover{background:var(--panel-2)}
       // пост пачки, срок за день до даты поста (если не заполнено руками).
       extraRows.forEach(function(r){
         if (!r.taskTitle) r.taskTitle = "Выйти на связь для контроля";
-        if (!r.taskDue){
-          var d = new Date(r.date+"T00:00:00");
-          if (!isNaN(d)){ d.setDate(d.getDate()-1); r.taskDue = d.toISOString().slice(0,10); }
-        }
+        if (!r.taskDue) r.taskDue = addDaysToDateStr(r.date, -1);
       });
       doPostAutosave().then(function(){
         if (!extraRows.length){ refreshData(); backOut(selPid); return; }
