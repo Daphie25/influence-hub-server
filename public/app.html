@@ -2706,6 +2706,25 @@ tbody tr:hover{background:var(--panel-2)}
       if (!isNaN(d)){ d.setDate(d.getDate()-1); dueEl.value = d.toISOString().slice(0,10); }
     }
   }
+  // ---------- автосохранение форм (карточка партнёра, пост) ----------
+  // Поля сохраняются сразу по вводу — больше не нужно листать форму вниз и
+  // жать "Сохранить". Текстовые поля — с debounce (чтобы не слать запрос на
+  // каждую букву), select/date/чекбоксы — сразу по change.
+  function debounce(fn, wait){
+    var t;
+    return function(){
+      var args = arguments, ctx = this;
+      clearTimeout(t);
+      t = setTimeout(function(){ fn.apply(ctx, args); }, wait);
+    };
+  }
+  function setAutosaveStatus(el, state){
+    if (!el) return;
+    if (state==="saving"){ el.textContent = "Сохраняю…"; el.style.color = "var(--muted)"; }
+    else if (state==="saved"){ el.textContent = "Сохранено ✓"; el.style.color = "var(--st-green)"; }
+    else if (state==="error"){ el.textContent = "Ошибка сохранения"; el.style.color = "var(--st-red)"; }
+    else { el.textContent = ""; }
+  }
   function openPostForm(partnerId, existingPost, prefillDate){
     var isNew = !existingPost;
     var post = existingPost || {};
@@ -2763,17 +2782,18 @@ tbody tr:hover{background:var(--panel-2)}
       )+
       '<div id="pstExtraRows"></div>'+
       '<button class="btn btn-sm" type="button" id="addExtraPostBtn">+ Ещё пост в этой пачке</button>'+
-      '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">'+
-        '<button class="btn btn-accent" id="savePost">Сохранить</button>'+
+      '<div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;align-items:center">'+
+        '<button class="btn btn-accent" id="savePost">Готово</button>'+
         (!isNew? '<button class="btn btn-danger" id="deletePost">Удалить</button>' : "")+
-        '<button class="btn btn-ghost" id="cancelPost">Отмена</button>'+
+        '<button class="btn btn-ghost" id="cancelPost">Закрыть</button>'+
+        '<span id="postAutosaveStatus" style="font-size:12px;color:var(--muted)"></span>'+
       '</div>';
     openModal(html);
     function backOut(toPid){
       closeOverlay();
       if (toPid) openPartnerDetail(toPid); else renderCalendarView();
     }
-    document.getElementById("cancelPost").addEventListener("click", function(){ backOut(pid); });
+    document.getElementById("cancelPost").addEventListener("click", function(){ closeOverlay(); });
     var openPartnerBtn = document.getElementById("openPartnerFromPostBtn");
     if (openPartnerBtn) openPartnerBtn.addEventListener("click", function(){ closeOverlay(); openPartnerDetail(pid); });
     var delBtn = document.getElementById("deletePost");
@@ -2870,6 +2890,83 @@ tbody tr:hover{background:var(--panel-2)}
     }
     var addExtraBtn = document.getElementById("addExtraPostBtn");
     if (addExtraBtn) addExtraBtn.addEventListener("click", addExtraPostRow);
+
+    // ---- автосохранение основных полей поста (без доп. постов пачки —
+    // те по-прежнему создаются только по явному нажатию "Готово", см. ниже) ----
+    var savedPostId = isNew ? null : post.id;
+    var linkedTaskId = post.taskId || null;
+    var postAutosaveStatusEl = document.getElementById("postAutosaveStatus");
+    function buildMainPostBody(){
+      var selPid = document.getElementById("pstPartner").value;
+      var date = document.getElementById("pstDate").value;
+      var pObj = partners.find(function(x){ return x.id===selPid; });
+      return {
+        partnerId: selPid, partnerName: pObj? pObj.name : "", refCode: pObj? pObj.refCode : "",
+        date: date, contentType: document.getElementById("pstType").value,
+        assignee: document.getElementById("pstAssignee").value,
+        topic: str("pstTopic"), status: document.getElementById("pstStatus").value || "planned",
+        price: num("pstPrice"), reach: num("pstReach"), link: str("pstLink"), note: str("pstNote"),
+        updatedAt: new Date().toISOString()
+      };
+    }
+    function syncLinkedTask(body){
+      var taskTitle = str("pstTaskTitle");
+      var taskDueEl = document.getElementById("pstTaskDue");
+      var taskDue = taskDueEl ? taskDueEl.value : "";
+      if (!taskTitle) return Promise.resolve();
+      var isNewTask = !linkedTaskId;
+      var taskRef = isNewTask ? db.collection("tasks").doc() : db.doc("tasks/"+linkedTaskId);
+      var taskBody = {
+        title: taskTitle, kind:"partner", partnerId: body.partnerId, partnerName: body.partnerName,
+        assignee: body.assignee || "", dueDate: taskDue || body.date, relatedPostId: savedPostId,
+        isPing: true, updatedAt: new Date().toISOString()
+      };
+      if (isNewTask){
+        taskBody.status = "open"; taskBody.createdAt = new Date().toISOString();
+        linkedTaskId = taskRef.id;
+        return taskRef.set(taskBody).then(function(){ return db.doc("posts/"+savedPostId).update({taskId: taskRef.id}); });
+      }
+      return taskRef.update(taskBody);
+    }
+    function doPostAutosave(){
+      if (!db || !canWrite) return Promise.resolve();
+      var pidEl = document.getElementById("pstPartner"), dateEl = document.getElementById("pstDate");
+      if (!pidEl || !dateEl) return Promise.resolve();
+      var selPid = pidEl.value, date = dateEl.value;
+      if (!selPid || !date){ setAutosaveStatus(postAutosaveStatusEl, ""); return Promise.resolve(); }
+      var isFirstSave = !savedPostId;
+      // Как и раньше: пинг-задача на новый пост подставляется дефолтом,
+      // если текст/срок ещё не заполнены вручную — только при первом
+      // сохранении (для уже существующего поста это не трогаем).
+      if (isFirstSave) fillPingDefaults("pstDate","pstTaskTitle","pstTaskDue");
+      var body = buildMainPostBody();
+      setAutosaveStatus(postAutosaveStatusEl, "saving");
+      var op;
+      if (isFirstSave){
+        var ref = db.collection("posts").doc();
+        savedPostId = ref.id;
+        body.createdAt = new Date().toISOString();
+        op = ref.set(body);
+      } else {
+        op = db.doc("posts/"+savedPostId).update(body);
+      }
+      return op.then(function(){ return syncLinkedTask(body); })
+        .then(function(){ setAutosaveStatus(postAutosaveStatusEl, "saved"); })
+        .catch(function(){ setAutosaveStatus(postAutosaveStatusEl, "error"); });
+    }
+    var debouncedPostAutosave = debounce(doPostAutosave, 700);
+    var postModalEl = document.querySelector("#ov .modal");
+    if (postModalEl){
+      postModalEl.addEventListener("input", function(e){
+        if (e.target.closest("[data-extra-row]")) return; // поля пачки не автосохраняем
+        if (e.target.matches("input,textarea")) debouncedPostAutosave();
+      });
+      postModalEl.addEventListener("change", function(e){
+        if (e.target.closest("[data-extra-row]")) return;
+        if (e.target.matches("select,input")) doPostAutosave();
+      });
+    }
+
     document.getElementById("savePost").addEventListener("click", function(){
       var selPid = document.getElementById("pstPartner").value;
       var date = document.getElementById("pstDate").value;
@@ -2879,19 +2976,13 @@ tbody tr:hover{background:var(--panel-2)}
       var assignee = document.getElementById("pstAssignee").value;
       // Ответственный на посте — это и есть источник правды для того, кто
       // ведёт партнёра в аккаунтинг-воронке: не нужно выбирать его ещё раз
-      // отдельно на доске воронки, он сам подтягивается при каждом
-      // сохранении поста (пока партнёр в аккаунтинге).
+      // отдельно на доске воронки, он сам подтягивается при финальном
+      // нажатии "Готово" (пока партнёр в аккаунтинге).
       if (p && p.funnel && p.funnel.mode==="accounting" && assignee && p.funnel.assignee!==assignee){
         db.doc("partners/"+selPid).update({
           funnel: Object.assign({}, p.funnel, {assignee:assignee, updatedAt:new Date().toISOString()})
         }).catch(function(){});
       }
-      var mainRow = {
-        date: date, contentType: document.getElementById("pstType").value,
-        status: document.getElementById("pstStatus").value || "planned",
-        topic: str("pstTopic"), reach: num("pstReach"), link: str("pstLink"), note: str("pstNote"),
-        taskTitle: str("pstTaskTitle"), taskDue: document.getElementById("pstTaskDue").value
-      };
       var extraRows = extraIndices.map(function(idx){
         var rid = "pstExtra"+idx;
         return {
@@ -2902,84 +2993,57 @@ tbody tr:hover{background:var(--panel-2)}
           taskTitle: str(rid+"TaskTitle"), taskDue: document.getElementById(rid+"TaskDue").value
         };
       }).filter(function(r){ return r.date; }); // ряд без даты в расчёт не берём
-      // Напоминание "выйти на связь для контроля" теперь ставится само на
-      // КАЖДЫЙ новый пост (а не только один раз при первой постановке в
-      // воронку) — срок за день до даты поста. Трогаем только пустые поля:
-      // если в "Задаче" уже что-то вписано вручную (в т.ч. специально
-      // оставлено пустым при редактировании существующего поста), это не
-      // переписываем.
-      function defaultPing(row, rowIsNew){
-        if (!rowIsNew || !row.date) return;
-        if (!row.taskTitle) row.taskTitle = "Выйти на связь для контроля";
-        if (!row.taskDue){
-          var d = new Date(row.date+"T00:00:00");
-          if (!isNaN(d)){ d.setDate(d.getDate()-1); row.taskDue = d.toISOString().slice(0,10); }
+      // Напоминание "выйти на связь для контроля" — дефолт на каждый новый
+      // пост пачки, срок за день до даты поста (если не заполнено руками).
+      extraRows.forEach(function(r){
+        if (!r.taskTitle) r.taskTitle = "Выйти на связь для контроля";
+        if (!r.taskDue){
+          var d = new Date(r.date+"T00:00:00");
+          if (!isNaN(d)){ d.setDate(d.getDate()-1); r.taskDue = d.toISOString().slice(0,10); }
         }
-      }
-      defaultPing(mainRow, isNew);
-      extraRows.forEach(function(r){ defaultPing(r, true); });
-      var postRef = isNew ? db.collection("posts").doc() : db.doc("posts/"+post.id);
-      var body = {
-        partnerId: selPid, partnerName: p? p.name : "", refCode: p? p.refCode : "",
-        date: date, contentType: mainRow.contentType, assignee: assignee,
-        topic: mainRow.topic, status: mainRow.status,
-        price: num("pstPrice"), reach: mainRow.reach, link: mainRow.link, note: mainRow.note,
-        updatedAt: new Date().toISOString()
-      };
-      // Если добавили доп. ряды — этот пост либо становится первым в НОВОЙ
-      // пачке (новый пост или существующий одиночный без batchId), либо уже
-      // состоит в пачке (batchId есть) — тогда просто используем его как якорь.
-      var batchId = post.batchId || null;
-      if (extraRows.length && !batchId){ batchId = postRef.id; body.batchId = batchId; if (post.batchIndex==null) body.batchIndex = 0; }
-      var postOp = isNew ? postRef.set(Object.assign({createdAt:new Date().toISOString()}, body)) : postRef.update(body);
-      var taskTitle = mainRow.taskTitle;
-      postOp.then(function(){
-        if (!taskTitle) return Promise.resolve();
-        var taskRef = post.taskId ? db.doc("tasks/"+post.taskId) : db.collection("tasks").doc();
-        var taskBody = {
-          title: taskTitle, kind:"partner", partnerId: selPid, partnerName: p? p.name : "",
-          assignee: assignee || "", dueDate: mainRow.taskDue || date, relatedPostId: postRef.id,
-          isPing: true, updatedAt: new Date().toISOString()
-        };
-        var taskOp;
-        if (post.taskId){
-          taskOp = taskRef.update(taskBody);
-        } else {
-          taskBody.status = "open"; taskBody.createdAt = new Date().toISOString();
-          taskOp = taskRef.set(taskBody);
+      });
+      doPostAutosave().then(function(){
+        if (!extraRows.length){ refreshData(); backOut(selPid); return; }
+        // Если добавили доп. ряды — этот пост либо становится первым в
+        // НОВОЙ пачке (одиночный пост без batchId), либо уже состоит в
+        // пачке (batchId есть) — тогда просто используем его как якорь.
+        var batchId = post.batchId || null;
+        var batchUpdate = Promise.resolve();
+        if (!batchId){
+          batchId = savedPostId;
+          batchUpdate = db.doc("posts/"+savedPostId).update({batchId: batchId, batchIndex: 0});
         }
-        return taskOp.then(function(){ return postRef.update({taskId: taskRef.id}); });
-      }).then(function(){
-        if (!extraRows.length) return Promise.resolve();
-        // Доп. посты пачки — "бонусом", без своей цены (вся сумма уже
-        // указана на основном/первом посте пачки). batchIndex считаем от
-        // числа уже загруженных постов этой пачки (достаточно точно для
-        // сортировки/отображения, не используется для расчётов суммы).
-        var baseIndex = posts.filter(function(x){ return x.batchId===batchId; }).length || 1;
-        var writes = extraRows.map(function(row, i){
-          var ref = db.collection("posts").doc();
-          return { ref: ref, row: row, body: {
-            partnerId: selPid, partnerName: p? p.name : "", refCode: p? p.refCode : "",
-            date: row.date, contentType: row.contentType, assignee: assignee,
-            topic: row.topic, status: row.status, price: null,
-            reach: row.reach, link: row.link, note: row.note,
-            batchId: batchId, batchIndex: baseIndex+i,
-            createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
-          }};
-        });
-        return Promise.all(writes.map(function(w){ return w.ref.set(w.body); }))
-          .then(function(){
-            return Promise.all(writes.map(function(w){
-              if (!w.row.taskTitle) return Promise.resolve();
-              var taskRef = db.collection("tasks").doc();
-              return taskRef.set({
-                title: w.row.taskTitle, kind:"partner", partnerId: selPid, partnerName: p? p.name : "",
-                assignee: assignee || "", dueDate: w.row.taskDue || w.row.date, relatedPostId: w.ref.id,
-                isPing: true, status:"open", createdAt:new Date().toISOString(), updatedAt:new Date().toISOString()
-              }).then(function(){ return w.ref.update({taskId: taskRef.id}); });
-            }));
+        batchUpdate.then(function(){
+          // Доп. посты пачки — "бонусом", без своей цены (вся сумма уже
+          // указана на основном/первом посте пачки). batchIndex считаем от
+          // числа уже загруженных постов этой пачки (достаточно точно для
+          // сортировки/отображения, не используется для расчётов суммы).
+          var baseIndex = posts.filter(function(x){ return x.batchId===batchId; }).length || 1;
+          var writes = extraRows.map(function(row, i){
+            var ref = db.collection("posts").doc();
+            return { ref: ref, row: row, body: {
+              partnerId: selPid, partnerName: p? p.name : "", refCode: p? p.refCode : "",
+              date: row.date, contentType: row.contentType, assignee: assignee,
+              topic: row.topic, status: row.status, price: null,
+              reach: row.reach, link: row.link, note: row.note,
+              batchId: batchId, batchIndex: baseIndex+i,
+              createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+            }};
           });
-      }).then(function(){ refreshData(); backOut(selPid); }).catch(function(){ refreshData(); backOut(selPid); });
+          return Promise.all(writes.map(function(w){ return w.ref.set(w.body); }))
+            .then(function(){
+              return Promise.all(writes.map(function(w){
+                if (!w.row.taskTitle) return Promise.resolve();
+                var taskRef = db.collection("tasks").doc();
+                return taskRef.set({
+                  title: w.row.taskTitle, kind:"partner", partnerId: selPid, partnerName: p? p.name : "",
+                  assignee: assignee || "", dueDate: w.row.taskDue || w.row.date, relatedPostId: w.ref.id,
+                  isPing: true, status:"open", createdAt:new Date().toISOString(), updatedAt:new Date().toISOString()
+                }).then(function(){ return w.ref.update({taskId: taskRef.id}); });
+              }));
+            });
+        }).then(function(){ refreshData(); backOut(selPid); }).catch(function(){ refreshData(); backOut(selPid); });
+      }).catch(function(){ refreshData(); backOut(selPid); });
     });
   }
 
@@ -3163,17 +3227,92 @@ tbody tr:hover{background:var(--panel-2)}
       '<div class="field"><label>Другое</label><input id="cOther" value="'+esc(c.other||"")+'"></div></div>'+
       '<div class="row2"><div class="field"><label>Email</label><input id="cEmail" value="'+esc(c.email||"")+'"></div></div>'+
 
-      '<div style="display:flex;gap:8px;margin-top:16px">'+
-        '<button class="btn btn-accent" id="savePartner">Сохранить</button>'+
-        '<button class="btn btn-ghost" id="cancelPartner">Отмена</button>'+
+      '<div style="display:flex;gap:8px;margin-top:16px;align-items:center;flex-wrap:wrap">'+
+        '<button class="btn btn-accent" id="donePartner">Готово</button>'+
+        '<button class="btn btn-ghost" id="closePartner">Закрыть</button>'+
         (isNew?"":'<button class="btn btn-danger" id="deletePartner" style="margin-left:auto">Удалить партнёра</button>')+
+        '<span id="partnerAutosaveStatus" style="font-size:12px;color:var(--muted)"></span>'+
       '</div>';
     openModal(html);
     priceRowCounter = (t.priceList||[]).length ? (t.priceList.length - 1) : -1;
     wirePriceRowDeleteButtons();
     document.getElementById("addPriceRowBtn").addEventListener("click", addExtraPriceRow);
-    document.getElementById("cancelPartner").addEventListener("click", function(){ closeOverlay(); if(!isNew) openPartnerDetail(p.id); });
-    document.getElementById("savePartner").addEventListener("click", function(){ savePartner(p, isNew); });
+
+    // ---- автосохранение: поля пишутся сразу по вводу, листать форму вниз
+    // и жать "Сохранить" больше не нужно — кнопки ниже только закрывают
+    // окно (для нового партнёра запись создаётся сама, как только введено
+    // обязательное поле "Имя"). ----
+    var savedPartnerId = isNew ? null : p.id;
+    var partnerAutosaveStatusEl = document.getElementById("partnerAutosaveStatus");
+    function buildPartnerBody(){
+      return {
+        name:str("pName"), refCode:str("pRefCode"), platform:str("pPlatform"), language:str("pLanguage"),
+        level:str("pLevel"), segment:str("pSegment"), trend:str("pTrend"), status:str("pStatus")||"grey",
+        metrics: {
+          reg30:num("mReg30"), reg12m:num("mReg12m"), regTotal:num("mRegTotal"), activeTraders:num("mActiveTraders"),
+          revenueTotal:num("mRevenueTotal"), revenueLastMonth:num("mRevenueLastMonth"), revenueDelta:num("mRevenueDelta"),
+          conversion:num("mConversion"), paidToPartner:num("mPaidToPartner"), paidToUs:num("mPaidToUs")
+        },
+        audience:{
+          geo:str("pGeo"), exchange:str("pExchange"), subscribers:num("pSubscribers"), avgViews:num("pAvgViews")
+        },
+        terms:{
+          type:str("tType"), revsharePct:num("tRevshare"), validUntil:str("tValidUntil"),
+          priceList: collectPriceList(), packNote:str("tPackNote"),
+          kpi:str("tKpi"), contract:str("tContract"), payout:str("tPayout")
+        },
+        contacts:{
+          tg:str("cTg"), instagram:str("cInstagram"), tgChat:str("cTgChat"), tgChannel:str("cTgChannel"),
+          youtube:str("cYoutube"), other:str("cOther"), email:str("cEmail")
+        },
+        updatedAt:new Date().toISOString()
+      };
+    }
+    // Автоматический переход по "лестнице" не привязан к сохранению формы —
+    // он двигается от momentum×quality на еженедельном импорте метрик (см.
+    // recomputeHealthSignals ниже). Здесь сохраняем ровно то, что лид
+    // выбрал/ввёл руками.
+    function doPartnerAutosave(){
+      if (!db || !canWrite) return Promise.resolve();
+      var nameEl = document.getElementById("pName");
+      if (!nameEl) return Promise.resolve();
+      if (!nameEl.value.trim()){ setAutosaveStatus(partnerAutosaveStatusEl, ""); return Promise.resolve(); }
+      var body = buildPartnerBody();
+      setAutosaveStatus(partnerAutosaveStatusEl, "saving");
+      var op;
+      if (!savedPartnerId){
+        var ref = db.collection("partners").doc();
+        savedPartnerId = ref.id;
+        body.createdAt = new Date().toISOString();
+        body.lastContactDate = body.lastContactDate || "";
+        op = ref.set(body);
+      } else {
+        op = db.doc("partners/"+savedPartnerId).update(body);
+      }
+      return op.then(function(){ setAutosaveStatus(partnerAutosaveStatusEl, "saved"); })
+        .catch(function(){ setAutosaveStatus(partnerAutosaveStatusEl, "error"); });
+    }
+    var debouncedPartnerAutosave = debounce(doPartnerAutosave, 700);
+    var partnerModalEl = document.querySelector("#ov .modal");
+    if (partnerModalEl){
+      partnerModalEl.addEventListener("input", function(e){
+        if (e.target.matches("input,textarea")) debouncedPartnerAutosave();
+      });
+      partnerModalEl.addEventListener("change", function(e){
+        if (e.target.matches("select,input")) doPartnerAutosave();
+      });
+      partnerModalEl.addEventListener("click", function(e){
+        if (e.target.closest("#addPriceRowBtn") || e.target.closest("[data-price-del]")) doPartnerAutosave();
+      });
+    }
+    document.getElementById("closePartner").addEventListener("click", function(){ closeOverlay(); });
+    document.getElementById("donePartner").addEventListener("click", function(){
+      Promise.resolve(doPartnerAutosave()).then(function(){
+        closeOverlay();
+        return refreshData();
+      }).then(function(){ if (savedPartnerId) openPartnerDetail(savedPartnerId); })
+      .catch(function(){ closeOverlay(); if (savedPartnerId) openPartnerDetail(savedPartnerId); });
+    });
     var delBtn = document.getElementById("deletePartner");
     if (delBtn) delBtn.addEventListener("click", function(){
       if (!db) return;
@@ -3183,43 +3322,6 @@ tbody tr:hover{background:var(--panel-2)}
   function nzv(v){ return (v==null) ? "" : v; }
   function num(id){ var v = document.getElementById(id).value; return v===""? null : Number(v); }
   function str(id){ return document.getElementById(id).value.trim(); }
-
-  function savePartner(p, isNew){
-    var name = str("pName");
-    if (!name){ document.getElementById("pName").focus(); return; }
-    var typedSegment = str("pSegment");
-    var metrics = {
-      reg30:num("mReg30"), reg12m:num("mReg12m"), regTotal:num("mRegTotal"), activeTraders:num("mActiveTraders"),
-      revenueTotal:num("mRevenueTotal"), revenueLastMonth:num("mRevenueLastMonth"), revenueDelta:num("mRevenueDelta"),
-      conversion:num("mConversion"), paidToPartner:num("mPaidToPartner"), paidToUs:num("mPaidToUs")
-    };
-    var body = {
-      name:name, refCode:str("pRefCode"), platform:str("pPlatform"), language:str("pLanguage"),
-      level:str("pLevel"), segment:typedSegment, trend:str("pTrend"), status:str("pStatus")||"grey",
-      metrics: metrics,
-      audience:{
-        geo:str("pGeo"), exchange:str("pExchange"), subscribers:num("pSubscribers"), avgViews:num("pAvgViews")
-      },
-      terms:{
-        type:str("tType"), revsharePct:num("tRevshare"), validUntil:str("tValidUntil"),
-        priceList: collectPriceList(), packNote:str("tPackNote"),
-        kpi:str("tKpi"), contract:str("tContract"), payout:str("tPayout")
-      },
-      contacts:{
-        tg:str("cTg"), instagram:str("cInstagram"), tgChat:str("cTgChat"), tgChannel:str("cTgChannel"),
-        youtube:str("cYoutube"), other:str("cOther"), email:str("cEmail")
-      },
-      updatedAt:new Date().toISOString()
-    };
-    // Автоматический переход по "лестнице" больше не привязан к ручному
-    // сохранению формы — он двигается от momentum×quality на еженедельном
-    // импорте метрик (см. recomputeHealthSignals ниже). Здесь сохраняем
-    // ровно то, что лид выбрал/ввёл руками.
-    if (isNew){ body.lastContactDate = body.lastContactDate || ""; body.createdAt = new Date().toISOString(); }
-    var ref = isNew ? db.collection("partners").doc() : db.doc("partners/"+p.id);
-    var op = isNew ? ref.set(body) : ref.update(body);
-    op.then(function(){ return refreshData(); }).then(function(){ closeOverlay(); openPartnerDetail(ref.id); }).catch(function(){ closeOverlay(); });
-  }
 
   // ---------- отчёты: переключение вкладок ----------
   document.querySelectorAll("#reportsTabs .tab").forEach(function(tab){
