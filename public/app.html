@@ -892,7 +892,7 @@ tbody tr:hover{background:var(--panel-2)}
   var FUNNEL_STAGES = [
     {v:"contact", label:"Первый контакт"},
     {v:"terms", label:"Обсуждение условий"},
-    {v:"payment", label:"Оплата и условия"},
+    {v:"payment", label:"Оплата"},
     {v:"content", label:"Ожидание контента"},
     {v:"evaluation", label:"Оценка результата"}
   ];
@@ -1380,13 +1380,62 @@ tbody tr:hover{background:var(--panel-2)}
         return bits.length ? bits.join(" — ") : null;
       }).filter(Boolean);
   }
-  function weeklyActiveHuntingCount(){
-    return partners.filter(function(p){ return p.funnel && p.funnel.mode==="hunting"; }).length;
+  // «Активные диалоги» — по явной просьбе это партнёры в АККАУНТИНГ-воронке
+  // на стадиях «Обсуждение условий» / «Оплата» / «Ожидание контента» (идёт
+  // живой диалог по условиям или по контенту), а не хантинг-кандидаты.
+  function weeklyActiveDialogsCount(){
+    var stages = ["terms","payment","content"];
+    return partners.filter(function(p){ return p.funnel && p.funnel.mode==="accounting" && stages.indexOf(p.funnel.stage)>=0; }).length;
+  }
+  // Хантинг-воронка не хранит историю переходов по стадиям — только
+  // текущую стадию (funnel.stage) и, после завершения, запись в funnelLog
+  // (без стадии). Поэтому для недельного срача по хантингу используем то,
+  // что есть надёжно:
+  // – «всего»: кого добавили в хантинг НА ЭТОЙ неделе — по funnel.startedAt
+  //   (пока партнёр активен) или по createdAt (p.createdAt==funnel.startedAt
+  //   в момент создания карточки через анкету хантинга — выживает после
+  //   архивации, когда funnel обнуляется).
+  // – «ответов»: из этой когорты — кто сейчас стоит НЕ на «Первый контакт»,
+  //   либо уже завершил воронку (funnelLog содержит mode:"hunting") — дойти
+  //   до «Оценка результата» (откуда и пишется funnelLog) можно только
+  //   покинув «Первый контакт», так что это верно даже для тех, кто отказал
+  //   и попал в результат сразу после первого контакта.
+  // – «отправлено в оплату»: из этой когорты — кто СЕЙЧАС стоит на стадии
+  //   «Оплата» или дальше (пока воронка активна); для уже завершённых
+  //   хантинг-карточек стадия, на которой их закрыли, не сохраняется, так
+  //   что эта цифра — по тем, кто ещё виден в воронке. Можно поправить
+  //   руками при необходимости.
+  var PAYMENT_STAGE_IDX = FUNNEL_STAGES.findIndex(function(s){ return s.v==="payment"; });
+  function everInHunting(p){
+    return !!(p.funnel && p.funnel.mode==="hunting") || !!(p.funnelLog||[]).some(function(e){ return e.mode==="hunting"; });
+  }
+  function huntingAddedInWeek(p, weekStart, weekEnd){
+    if (!everInHunting(p)) return false;
+    var started = (p.funnel && p.funnel.mode==="hunting" && p.funnel.startedAt) ? p.funnel.startedAt.slice(0,10) : null;
+    var created = p.createdAt ? p.createdAt.slice(0,10) : null;
+    var d = started || created;
+    return !!d && d>=weekStart && d<=weekEnd;
+  }
+  function huntingResponded(p){
+    if ((p.funnelLog||[]).some(function(e){ return e.mode==="hunting"; })) return true;
+    return !!(p.funnel && p.funnel.mode==="hunting" && funnelStageIdx(p) > 0);
+  }
+  function huntingReachedPayment(p){
+    return !!(p.funnel && p.funnel.mode==="hunting" && funnelStageIdx(p) >= PAYMENT_STAGE_IDX);
+  }
+  function weeklyHuntingFunnelStats(weekStart, weekEnd){
+    var cohort = partners.filter(function(p){ return huntingAddedInWeek(p, weekStart, weekEnd); });
+    var total = cohort.length;
+    var responded = cohort.filter(huntingResponded).length;
+    var paid = cohort.filter(huntingReachedPayment).length;
+    var conversion = total ? Math.round(responded/total*100) : null;
+    return {total:total, responded:responded, paid:paid, conversion:conversion};
   }
   function weeklyReportDraftText(weekStart, weekEnd, weekLabel){
     var production = weeklyProductionList();
     var published = weeklyPublishedList(weekStart, weekEnd);
-    var activeDialogs = weeklyActiveHuntingCount();
+    var activeDialogs = weeklyActiveDialogsCount();
+    var hunt = weeklyHuntingFunnelStats(weekStart, weekEnd);
     var lines = [];
     lines.push("Неделя: " + weekLabel);
     lines.push("");
@@ -1403,10 +1452,10 @@ tbody tr:hover{background:var(--panel-2)}
     lines.push("");
     lines.push("2. Хантинг");
     lines.push("Проработано за неделю:");
-    lines.push("– всего: ");
-    lines.push("– ответов: ");
-    lines.push("– конверсия недели: ");
-    lines.push("– отправлено в оплату: ");
+    lines.push("– всего: " + hunt.total);
+    lines.push("– ответов: " + hunt.responded);
+    lines.push("– конверсия недели: " + (hunt.conversion!=null ? hunt.conversion+"%" : "—"));
+    lines.push("– отправлено в оплату: " + hunt.paid);
     lines.push("Разбивка:");
     lines.push("– ");
     lines.push("Активные диалоги:");
@@ -1416,6 +1465,9 @@ tbody tr:hover{background:var(--panel-2)}
     lines.push("– ");
     lines.push("");
     lines.push("4. Фокус на следующую неделю");
+    lines.push("– ");
+    lines.push("");
+    lines.push("5. Проблемы (впишите руками)");
     lines.push("– ");
     return lines.join("\n");
   }
@@ -1492,7 +1544,12 @@ tbody tr:hover{background:var(--panel-2)}
     var label = weeklyWeekLabel(weekStart);
     var existing = currentWeeklyReportDoc();
     var draft = (existing && existing.draftText!=null) ? existing.draftText : weeklyReportDraftText(weekStart, weekEnd, label);
-    var problems = (existing && existing.problems!=null) ? existing.problems : "";
+    // Раньше «Проблемы» было отдельным приватным полем — окно объединили с
+    // основным отчётом (по просьбе), так что переносим то, что там уже
+    // было сохранено, прямо в сам черновик, если это ещё не сделано.
+    if (existing && existing.problems && draft.indexOf("Проблемы") === -1){
+      draft = draft + "\n\n5. Проблемы\n" + existing.problems;
+    }
     var autoCounts = weekFunnelCompletions(weekStart, weekEnd);
     var huntProcessed = (existing && existing.huntProcessed!=null) ? existing.huntProcessed : autoCounts.hunt;
     var acctProcessed = (existing && existing.acctProcessed!=null) ? existing.acctProcessed : autoCounts.acct;
@@ -1520,17 +1577,12 @@ tbody tr:hover{background:var(--panel-2)}
           '<div class="field" style="margin-bottom:0"><label>Отработано из аккаунтинга (партнёров)</label><input type="number" id="wrAcctProcessed" value="'+esc(acctProcessed)+'" '+(canWrite?'':'disabled')+'></div>'+
         '</div>'+
         '<div style="color:var(--muted);font-size:11.5px;margin-bottom:10px">Подставлено автоматически — считается по тому, сколько партнёров завершили воронку хантинга/аккаунтинга за эту неделю (кнопка «Завершить воронку» на карточке). Можно поправить руками, если нужно. Эти две цифры копятся по неделям в гистограмму «Хантинг vs Аккаунтинг» на вкладке «Аналитика».</div>'+
-        '<textarea id="wrDraftText" style="width:100%;min-height:380px;font-family:var(--font-mono);font-size:12.5px;line-height:1.5" '+(canWrite?'':'disabled')+'>'+esc(draft)+'</textarea>'+
-        '<div style="color:var(--muted);font-size:11.5px;margin-top:6px">«В продакшене» и «Опубликовано за неделю» подставлены автоматически из карточек партнёров (воронка аккаунтинга, этап «Ожидание контента») и календаря постов за выбранную неделю. Остальное — хантинг, спец-задачи, фокус — впишите сами, текст свободно редактируется.</div>'+
-      '</div>'+
-      '<div class="card" style="margin-bottom:14px">'+
-        '<h3 style="margin:0 0 10px">4. Проблемы <span style="color:var(--muted);font-weight:400;font-size:12px">(в паблик не идёт, остаётся только у вас)</span></h3>'+
-        '<textarea id="wrProblemsText" style="width:100%;min-height:90px;font-family:var(--font-mono);font-size:12.5px" placeholder="– низкая конверсия в ответ у хохлов&#10;– задержки с апрувами оплат" '+(canWrite?'':'disabled')+'>'+esc(problems)+'</textarea>'+
+        '<textarea id="wrDraftText" style="width:100%;min-height:460px;font-family:var(--font-mono);font-size:12.5px;line-height:1.5" '+(canWrite?'':'disabled')+'>'+esc(draft)+'</textarea>'+
+        '<div style="color:var(--muted);font-size:11.5px;margin-top:6px">«В продакшене», «Опубликовано за неделю» и цифры по хантингу подставлены автоматически из карточек партнёров и календаря постов за выбранную неделю. Остальное — спец-задачи, фокус, проблемы — впишите сами, текст свободно редактируется.</div>'+
       '</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
         (canWrite? '<button class="btn btn-accent" id="wrSaveBtn">Сохранить черновик</button>' : '')+
         '<button class="btn btn-ghost" id="wrCopyPublicBtn">Скопировать отчёт</button>'+
-        (canWrite? '<button class="btn btn-ghost" id="wrCopyWithProblemsBtn">Скопировать с проблемами (себе)</button>' : '')+
       '</div>';
 
     document.getElementById("wrPrevWeek").addEventListener("click", function(){
@@ -1554,7 +1606,6 @@ tbody tr:hover{background:var(--panel-2)}
       var body = {
         weekStart: weekStart, weekLabel: label,
         draftText: document.getElementById("wrDraftText").value,
-        problems: document.getElementById("wrProblemsText").value,
         huntProcessed: num("wrHuntProcessed"),
         acctProcessed: num("wrAcctProcessed"),
         updatedAt: new Date().toISOString()
@@ -1568,13 +1619,6 @@ tbody tr:hover{background:var(--panel-2)}
     });
     document.getElementById("wrCopyPublicBtn").addEventListener("click", function(){
       copyToClipboard(document.getElementById("wrDraftText").value, this);
-    });
-    var copyBothBtn = document.getElementById("wrCopyWithProblemsBtn");
-    if (copyBothBtn) copyBothBtn.addEventListener("click", function(){
-      var pub = document.getElementById("wrDraftText").value;
-      var probl = document.getElementById("wrProblemsText").value;
-      var full = pub + "\n\n5. Проблемы\n" + (probl.trim() ? probl : "– —");
-      copyToClipboard(full, this);
     });
   }
 
