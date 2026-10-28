@@ -2713,6 +2713,7 @@ tbody tr:hover{background:var(--panel-2)}
   function fillPingDefaults(dateId, titleId, dueId){
     var dateEl = document.getElementById(dateId), titleEl = document.getElementById(titleId), dueEl = document.getElementById(dueId);
     if (!dateEl || !titleEl || !dueEl || !dateEl.value) return;
+    if (dateEl.value < today()) return; // пост задним числом — без дефолтного пинга
     if (!titleEl.value) titleEl.value = "Выйти на связь для контроля";
     if (!dueEl.value) dueEl.value = addDaysToDateStr(dateEl.value, -1);
   }
@@ -2928,6 +2929,14 @@ tbody tr:hover{background:var(--panel-2)}
       var titleEl = document.getElementById("pstTaskTitle");
       var dueEl = document.getElementById("pstTaskDue");
       if (!dateEl || !titleEl || !dueEl || !dateEl.value) return;
+      if (dateEl.value < today()){
+        // Пост задним числом — напоминание по умолчанию не нужно. Если поля
+        // ещё содержат наш же авто-дефолт (пользователь их не трогал) —
+        // убираем; то, что вписали руками, не трогаем.
+        if (pingAutoTitle){ titleEl.value = ""; pingAutoTitle = false; }
+        if (pingAutoDue){ dueEl.value = ""; pingAutoDue = false; }
+        return;
+      }
       if (!titleEl.value || pingAutoTitle){ titleEl.value = "Выйти на связь для контроля"; pingAutoTitle = true; }
       if (!dueEl.value || pingAutoDue){ dueEl.value = addDaysToDateStr(dateEl.value, -1); pingAutoDue = true; }
     }
@@ -2948,7 +2957,17 @@ tbody tr:hover{background:var(--panel-2)}
       var taskTitle = str("pstTaskTitle");
       var taskDueEl = document.getElementById("pstTaskDue");
       var taskDue = taskDueEl ? taskDueEl.value : "";
-      if (!taskTitle) return Promise.resolve();
+      if (!taskTitle){
+        if (!linkedTaskId) return Promise.resolve();
+        // Поле напоминания очищено (например, пост перевели на заднюю дату
+        // и дефолтный пинг сам снялся) — удаляем уже созданную задачу, а не
+        // оставляем её висеть со старыми данными.
+        var idToDelete = linkedTaskId;
+        linkedTaskId = null;
+        return db.doc("tasks/"+idToDelete).delete()
+          .then(function(){ return db.doc("posts/"+savedPostId).update({taskId: null}); })
+          .catch(function(){});
+      }
       var isNewTask = !linkedTaskId;
       var taskRef = isNewTask ? db.collection("tasks").doc() : db.doc("tasks/"+linkedTaskId);
       var taskBody = {
@@ -3027,7 +3046,11 @@ tbody tr:hover{background:var(--panel-2)}
       }).filter(function(r){ return r.date; }); // ряд без даты в расчёт не берём
       // Напоминание "выйти на связь для контроля" — дефолт на каждый новый
       // пост пачки, срок за день до даты поста (если не заполнено руками).
+      // Для постов задним числом дефолт не ставим — нет смысла напоминать
+      // о контроле того, что уже произошло; если задачу вписали вручную —
+      // это не трогаем.
       extraRows.forEach(function(r){
+        if (r.date < today()) return;
         if (!r.taskTitle) r.taskTitle = "Выйти на связь для контроля";
         if (!r.taskDue) r.taskDue = addDaysToDateStr(r.date, -1);
       });
