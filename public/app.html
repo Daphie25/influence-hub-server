@@ -863,6 +863,21 @@ tbody tr:hover{background:var(--panel-2)}
   ];
   var LEVELS = ["A","B","C"];
   var CONTENT_TYPES = ["YouTube видео","TG пост","Instagram Reels","Instagram Stories","Подкаст","Стрим","Другое"];
+  // Небольшая метка (эмодзи-иконка + цвет) по типу контента — чтобы в
+  // календаре окошки разных площадок визуально отличались друг от друга
+  // с первого взгляда, без похода в карточку.
+  var CONTENT_TYPE_META = {
+    "YouTube видео": {icon:"▶️", color:"#e23744"},
+    "TG пост": {icon:"✈️", color:"#2aabee"},
+    "Instagram Reels": {icon:"📸", color:"#c13584"},
+    "Instagram Stories": {icon:"📸", color:"#c13584"},
+    "Подкаст": {icon:"🎙️", color:"#d8a33a"},
+    "Стрим": {icon:"🔴", color:"#e2432e"},
+    "Другое": {icon:"📄", color:"var(--muted)"}
+  };
+  function contentTypeMeta(ct){
+    return CONTENT_TYPE_META[ct] || {icon:"", color:"var(--border)"};
+  }
   var POST_STATUS = [
     {v:"planned", label:"Запланирован", chip:"chip-yellow"},
     {v:"published", label:"Вышел", chip:"chip-green"},
@@ -2335,8 +2350,9 @@ tbody tr:hover{background:var(--panel-2)}
     if (!rows.length) return '<div style="color:var(--muted);font-size:12.5px;padding:6px 0">Постов пока не запланировано.</div>';
     return rows.map(function(x){
       var sm = postStatusMeta(x.status);
+      var ctm = contentTypeMeta(x.contentType);
       return '<div class="kv" data-post-id="'+x.id+'" style="cursor:pointer">'+
-        '<span class="k">'+fmtDate(x.date)+(x.contentType?' · '+esc(x.contentType):'')+'</span>'+
+        '<span class="k">'+fmtDate(x.date)+(x.contentType?' · '+(ctm.icon?ctm.icon+' ':'')+esc(x.contentType):'')+'</span>'+
         '<span class="v" style="display:flex;align-items:center;gap:6px;justify-content:flex-end;font-family:inherit">'+
           (x.topic? '<span style="color:var(--muted-2,var(--muted))">'+esc(x.topic)+'</span>' : '')+
           (x.link? '<a href="'+esc(x.link)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent)">↗</a>' : '')+
@@ -2598,7 +2614,9 @@ tbody tr:hover{background:var(--panel-2)}
       var dayPosts = c.dateStr ? postsForDate(c.dateStr) : [];
       var cls = "cal-day" + (c.other? " other-month":"") + (c.dateStr===tdy? " today":"");
       var chips = dayPosts.map(function(x){
-        return '<div class="cal-post st-'+esc(x.status||"planned")+'" data-id="'+x.id+'" title="'+esc((x.partnerName||"—")+(x.contentType?" · "+x.contentType:"")+(x.topic?" · "+x.topic:""))+'">'+
+        var ctm = contentTypeMeta(x.contentType);
+        return '<div class="cal-post st-'+esc(x.status||"planned")+'" data-id="'+x.id+'" style="border-left:3px solid '+ctm.color+'" title="'+esc((x.partnerName||"—")+(x.contentType?" · "+x.contentType:"")+(x.topic?" · "+x.topic:""))+'">'+
+          (ctm.icon? '<span style="margin-right:4px">'+ctm.icon+'</span>' : '')+
           esc(x.partnerName||"—")+(x.contentType?' · '+esc(x.contentType):'')+
         '</div>';
       }).join("");
