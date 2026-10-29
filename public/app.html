@@ -2262,8 +2262,8 @@ tbody tr:hover{background:var(--panel-2)}
       '</div>'+
 
       '<div class="section-title">Контакты</div>'+
-      contactRow("TG личный", c.tg) + contactRow("Instagram", c.instagram) + contactRow("Чат в TG", c.tgChat) +
-      contactRow("Канал в TG", c.tgChannel) + contactRow("YouTube", c.youtube) + contactRow("Другое", c.other) + contactRow("Email", c.email) +
+      contactRow("TG личный", c.tg, "tg") + contactRow("Instagram", c.instagram, "instagram") + contactRow("Чат в TG", c.tgChat, "tgChat") +
+      contactRow("Канал в TG", c.tgChannel, "tgChannel") + contactRow("YouTube", c.youtube, "youtube") + contactRow("Другое", c.other, "other") + contactRow("Email", c.email, "email") +
 
       '<div class="section-title">Следующий шаг</div>'+
       '<div class="kv"><span class="k">Последний контакт</span><span class="v">'+fmtDate(p.lastContactDate)+'</span></div>'+
@@ -2339,15 +2339,48 @@ tbody tr:hover{background:var(--panel-2)}
         '<span class="k">'+fmtDate(x.date)+(x.contentType?' · '+esc(x.contentType):'')+'</span>'+
         '<span class="v" style="display:flex;align-items:center;gap:6px;justify-content:flex-end;font-family:inherit">'+
           (x.topic? '<span style="color:var(--muted-2,var(--muted))">'+esc(x.topic)+'</span>' : '')+
+          (x.link? '<a href="'+esc(x.link)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--accent)">↗</a>' : '')+
           '<span class="chip '+sm.chip+'">'+esc(sm.label)+'</span>'+
         '</span>'+
       '</div>';
     }).join("");
   }
   function nz(v){ return (v==null||v==="") ? "—" : v; }
-  function contactRow(label, val){
+  // Превращаем контакт (TG/Instagram/YouTube/email/...) в ссылку, если это
+  // похоже на хендл или готовый URL — чтобы переходить сразу, а не
+  // копировать текст и вставлять в поиск. Для "Другое" ссылку делаем
+  // только если это уже явно похоже на URL — там может быть что угодно
+  // (телефон, адрес и т.п.), и гадать не нужно.
+  function contactHref(kind, val){
+    if (!val) return null;
+    var v = val.trim();
+    if (!v) return null;
+    if (/^https?:\/\//i.test(v)) return v;
+    if (kind==="tg" || kind==="tgChat" || kind==="tgChannel"){
+      var h = v.replace(/^@/, "");
+      return /^[A-Za-z0-9_+]{3,64}$/.test(h) ? "https://t.me/"+h : null;
+    }
+    if (kind==="instagram"){
+      var ih = v.replace(/^@/, "");
+      return /^[A-Za-z0-9_.]{1,40}$/.test(ih) ? "https://instagram.com/"+ih : null;
+    }
+    if (kind==="youtube"){
+      var yh = v.replace(/^@/, "");
+      return /^[A-Za-z0-9_.-]{1,100}$/.test(yh) ? "https://youtube.com/@"+yh : null;
+    }
+    if (kind==="email"){
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? "mailto:"+v : null;
+    }
+    if (/^www\./i.test(v)) return "https://"+v;
+    return null;
+  }
+  function contactRow(label, val, kind){
     if (!val) return '<div class="kv"><span class="k">'+esc(label)+'</span><span class="v" style="font-family:inherit;color:var(--muted-2)">—</span></div>';
-    return '<div class="kv"><span class="k">'+esc(label)+'</span><span class="v" style="font-family:inherit">'+esc(val)+'</span></div>';
+    var href = contactHref(kind, val);
+    var valueHtml = href
+      ? '<a href="'+esc(href)+'" target="_blank" rel="noopener" style="color:var(--accent)">'+esc(val)+' ↗</a>'
+      : esc(val);
+    return '<div class="kv"><span class="k">'+esc(label)+'</span><span class="v" style="font-family:inherit">'+valueHtml+'</span></div>';
   }
 
   function fmtMonth(m){
@@ -2834,7 +2867,10 @@ tbody tr:hover{background:var(--panel-2)}
       '</div>'+
       '<div class="row2">'+
         '<div class="field"><label>Охваты</label><input type="number" id="pstReach" value="'+(post.reach!=null?post.reach:"")+'"></div>'+
-        '<div class="field"><label>Ссылка на публикацию</label><input id="pstLink" placeholder="https://..." value="'+esc(post.link||"")+'"></div>'+
+        '<div class="field"><label style="display:flex;justify-content:space-between;align-items:center;gap:6px">'+
+          '<span>Ссылка на публикацию</span>'+
+          (post.link? '<a href="'+esc(post.link)+'" target="_blank" rel="noopener" style="font-weight:600;color:var(--accent)">Открыть ↗</a>' : '')+
+        '</label><input id="pstLink" placeholder="https://..." value="'+esc(post.link||"")+'"></div>'+
       '</div>'+
       '<div class="field"><label>Заметка</label><textarea id="pstNote">'+esc(post.note||"")+'</textarea></div>'+
       '<div class="section-title">Задача</div>'+
