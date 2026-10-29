@@ -2867,10 +2867,12 @@ tbody tr:hover{background:var(--panel-2)}
       '</div>'+
       '<div class="row2">'+
         '<div class="field"><label>Охваты</label><input type="number" id="pstReach" value="'+(post.reach!=null?post.reach:"")+'"></div>'+
-        '<div class="field"><label style="display:flex;justify-content:space-between;align-items:center;gap:6px">'+
-          '<span>Ссылка на публикацию</span>'+
-          (post.link? '<a href="'+esc(post.link)+'" target="_blank" rel="noopener" style="font-weight:600;color:var(--accent)">Открыть ↗</a>' : '')+
-        '</label><input id="pstLink" placeholder="https://..." value="'+esc(post.link||"")+'"></div>'+
+        '<div class="field"><label>Ссылка на публикацию</label>'+
+          (post.link?
+            '<a href="'+esc(post.link)+'" target="_blank" rel="noopener" style="display:block;color:var(--accent);text-decoration:underline;font-size:12.5px;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(post.link)+'</a>'
+            : '')+
+          '<input id="pstLink" placeholder="https://..." value="'+esc(post.link||"")+'">'+
+        '</div>'+
       '</div>'+
       '<div class="field"><label>Заметка</label><textarea id="pstNote">'+esc(post.note||"")+'</textarea></div>'+
       '<div class="section-title">Задача</div>'+
