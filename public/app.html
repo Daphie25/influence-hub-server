@@ -1255,11 +1255,11 @@ tbody tr:hover{background:var(--panel-2)}
       var k = x.contentType || "Без типа"; b.byType[k] = (b.byType[k]||0)+1;
     });
     // "Потрачено" считаем по месяцу РАЗМЕЩЕНИЯ (дата создания поста в
-    // системе), а не по месяцу выхода — оплата проходит в момент
-    // размещения, даже если пост запланирован на будущий месяц.
+    // системе, с поправкой на paidPrevMonth — см. spentMonthOf выше), а не
+    // по месяцу выхода.
     posts.forEach(function(x){
-      if (!x.createdAt) return;
-      var mk = x.createdAt.slice(0,7);
+      var mk = spentMonthOf(x);
+      if (!mk) return;
       if (!byMonth[mk]) byMonth[mk] = {spent:0, reach:0, count:0, byType:{}};
       byMonth[mk].spent += (x.price||0);
     });
@@ -2530,16 +2530,33 @@ tbody tr:hover{background:var(--panel-2)}
   function postsForDate(dateStr){
     return posts.filter(function(x){ return x.date === dateStr; });
   }
+  // Месяц, в который идёт цена поста в сводке "Потрачено". По умолчанию —
+  // месяц СОЗДАНИЯ записи в системе (оплата проходит в момент размещения,
+  // даже если пост запланирован на будущий месяц). НО если запись внесли
+  // в Hub с опозданием (пост реально вышел и был оплачен в прошлом
+  // месяце) — для этого есть чекбокс "Оплата была в прошлом месяце"
+  // (post.paidPrevMonth), сдвигающий месяц ровно на один назад от
+  // createdAt. ДОБАВЛЕНО 02.11 — до этого задержка ввода (например,
+  // посты от 30-31 октября, занесённые 2 ноября) ошибочно задваивала их
+  // стоимость в ноябрьский бюджет.
+  function spentMonthOf(post){
+    if (!post.createdAt) return null;
+    var ck = post.createdAt.slice(0,7);
+    if (!post.paidPrevMonth) return ck;
+    var parts = ck.split("-"); var y = +parts[0], m = +parts[1];
+    m -= 1; if (m < 1){ m = 12; y -= 1; }
+    return y + "-" + (m<10?"0"+m:m);
+  }
   function calendarSummary(){
     var parts = calMonth.split("-"); var y = +parts[0], m = +parts[1];
     var daysInMonth = new Date(y, m, 0).getDate();
     var rangeLabel = "01."+pad2(m)+"-"+pad2(daysInMonth)+"."+pad2(m);
     var monthPosts = posts.filter(function(x){ return x.date && x.date.slice(0,7)===calMonth; });
     // "Потрачено" считаем по месяцу РАЗМЕЩЕНИЯ (дата создания поста в
-    // системе), а не по месяцу выхода: оплата проходит в момент размещения,
-    // даже если пост запланирован на будущий месяц. Охваты/счётчики ниже
-    // остаются привязаны к месяцу выхода.
-    var spentPosts = posts.filter(function(x){ return x.createdAt && x.createdAt.slice(0,7)===calMonth; });
+    // системе, с поправкой на paidPrevMonth — см. spentMonthOf выше), а не
+    // по месяцу выхода. Охваты/счётчики ниже остаются привязаны к месяцу
+    // выхода.
+    var spentPosts = posts.filter(function(x){ return spentMonthOf(x)===calMonth; });
     var spent = spentPosts.reduce(function(s,x){ return s + (x.price||0); }, 0);
     var reach = monthPosts.reduce(function(s,x){ return s + (x.reach||0); }, 0);
     var planned = monthPosts.filter(function(x){ return x.status==="planned"; }).length;
@@ -2904,7 +2921,11 @@ tbody tr:hover{background:var(--panel-2)}
         '<div class="field"><label>Статус</label><select id="pstStatus">'+
           POST_STATUS.map(function(s){ return '<option value="'+s.v+'" '+((post.status||"planned")===s.v?"selected":"")+'>'+esc(s.label)+'</option>'; }).join("")+
         '</select></div>'+
-        '<div class="field"><label>Цена размещения, $</label><input type="number" id="pstPrice" value="'+(post.price!=null?post.price:"")+'"></div>'+
+        '<div class="field"><label>Цена размещения, $</label><input type="number" id="pstPrice" value="'+(post.price!=null?post.price:"")+'">'+
+          '<label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:normal">'+
+            '<input type="checkbox" id="pstPaidPrevMonth" style="width:auto" '+(post.paidPrevMonth?"checked":"")+'> Оплата была в прошлом месяце (запись внесли с опозданием)'+
+          '</label>'+
+        '</div>'+
       '</div>'+
       '<div class="row2">'+
         '<div class="field"><label>Охваты</label><input type="number" id="pstReach" value="'+(post.reach!=null?post.reach:"")+'"></div>'+
@@ -3087,6 +3108,7 @@ tbody tr:hover{background:var(--panel-2)}
         assignee: document.getElementById("pstAssignee").value,
         topic: str("pstTopic"), status: document.getElementById("pstStatus").value || "planned",
         price: num("pstPrice"), reach: num("pstReach"), link: str("pstLink"), note: str("pstNote"),
+        paidPrevMonth: !!(document.getElementById("pstPaidPrevMonth") && document.getElementById("pstPaidPrevMonth").checked),
         updatedAt: new Date().toISOString()
       };
     }
