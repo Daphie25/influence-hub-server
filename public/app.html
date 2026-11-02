@@ -656,33 +656,55 @@ tbody tr:hover{background:var(--panel-2)}
   //     больше не нужно открывать карточку партнёра, чтобы она сдвинулась.
   // Возвращает счётчики изменений — используется после импорта метрик,
   // чтобы показать лиду, что по факту произошло.
+  // Подтягивает metrics.activeTraders/metrics.conversion из САМОГО СВЕЖЕГО
+  // снимка metricsHistory (поля users/payingUsers/payingPct) — те приходят
+  // отдельным еженедельным процессом из Grafana (см. комментарий у
+  // importWeeklyMetrics выше), который пишет только в metricsHistory и не
+  // знает о карточке партнёра. Без этой синхронизации activeTraders/
+  // conversion в карточке тихо устаревают или остаются от старого (до
+  // 27.10) Superset-импорта. ДОБАВЛЕНО 02.11: раньше этой синхронизации не
+  // было вообще — обнаружили, что у 371 из 448 партнёров с историей
+  // значения в карточке не совпадали со свежим снимком, и это нигде не
+  // чинилось само. Возвращает patch для metrics или null, если менять нечего.
+  function syncedMetricsPatch(p){
+    var snap = latestSnapshot(p);
+    if (!snap) return null;
+    var cur = p.metrics || {};
+    var wantActive = snap.payingUsers != null ? snap.payingUsers : cur.activeTraders;
+    var wantConv = snap.payingPct != null ? Math.round(snap.payingPct) : cur.conversion;
+    if (wantActive === cur.activeTraders && wantConv === cur.conversion) return null;
+    return Object.assign({}, cur, {activeTraders: wantActive, conversion: wantConv});
+  }
   function recomputeHealthSignals(){
     partners.forEach(function(p){ p.healthSignal = computeHealthSignal(p, partners); });
-    var trendChanges = 0, segmentChanges = 0;
-    if (canWrite !== true || !db) return {trendChanges:0, segmentChanges:0};
+    var trendChanges = 0, segmentChanges = 0, metricsSynced = 0;
+    if (canWrite !== true || !db) return {trendChanges:0, segmentChanges:0, metricsSynced:0};
     partners.forEach(function(p){
       var hs = p.healthSignal;
-      if (!hs || hs.insufficient) return;
       var updates = {};
-      if (hs.momentumBucket){
-        var newTrend = TREND_BY_BUCKET[hs.momentumBucket];
-        if (newTrend && p.trend !== newTrend) updates.trend = newTrend;
+      var metricsPatch = syncedMetricsPatch(p);
+      if (metricsPatch){ updates.metrics = metricsPatch; metricsSynced++; }
+      if (hs && !hs.insufficient){
+        if (hs.momentumBucket){
+          var newTrend = TREND_BY_BUCKET[hs.momentumBucket];
+          if (newTrend && p.trend !== newTrend) updates.trend = newTrend;
+        }
+        var target = autoLadderStep(p.segment, hs);
+        if (target && target !== p.segment){
+          updates.segment = target;
+          updates.autoCategoryLog = (p.autoCategoryLog||[]).concat([{
+            from: p.segment, to: target, at: new Date().toISOString(),
+            reason: "momentum="+hs.momentumBucket+", quality="+hs.qualityBucket+", вес="+hs.weightTier
+          }]).slice(-20);
+          segmentChanges++;
+        }
+        if (updates.trend) trendChanges++;
       }
-      var target = autoLadderStep(p.segment, hs);
-      if (target && target !== p.segment){
-        updates.segment = target;
-        updates.autoCategoryLog = (p.autoCategoryLog||[]).concat([{
-          from: p.segment, to: target, at: new Date().toISOString(),
-          reason: "momentum="+hs.momentumBucket+", quality="+hs.qualityBucket+", вес="+hs.weightTier
-        }]).slice(-20);
-        segmentChanges++;
-      }
-      if (updates.trend) trendChanges++;
       if (Object.keys(updates).length){
         db.doc("partners/"+p.id).update(updates).then(function(){ Object.assign(p, updates); }).catch(function(){});
       }
     });
-    return {trendChanges:trendChanges, segmentChanges:segmentChanges};
+    return {trendChanges:trendChanges, segmentChanges:segmentChanges, metricsSynced:metricsSynced};
   }
   function healthBadgeHtml(p){
     var hs = p.healthSignal;
