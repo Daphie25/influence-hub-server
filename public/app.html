@@ -2219,10 +2219,12 @@ tbody tr:hover{background:var(--panel-2)}
       '<div class="overlay" id="ov"><div class="drawer">'+html+'</div></div>';
     document.getElementById("ov").addEventListener("click", function(e){ if(e.target.id==="ov") closeOverlay(); });
   }
-  function openModal(html){
+  function openModal(html, noBackdropClose){
     document.getElementById("rootOverlay").innerHTML =
       '<div class="overlay center" id="ov"><div class="modal">'+html+'</div></div>';
-    document.getElementById("ov").addEventListener("click", function(e){ if(e.target.id==="ov") closeOverlay(); });
+    if (!noBackdropClose){
+      document.getElementById("ov").addEventListener("click", function(e){ if(e.target.id==="ov") closeOverlay(); });
+    }
   }
 
   // ---------- partner detail drawer ----------
@@ -2957,7 +2959,11 @@ tbody tr:hover{background:var(--panel-2)}
         '<button class="btn btn-ghost" id="cancelPost">Закрыть</button>'+
         '<span id="postAutosaveStatus" style="font-size:12px;color:var(--muted)"></span>'+
       '</div>';
-    openModal(html);
+    // noBackdropClose=true: форма поста автосохраняется по ходу заполнения,
+    // но случайный клик рядом с окном (например, левее/правее него) не
+    // должен закрывать его и обрывать заполнение — закрыть можно только
+    // явно кнопкой "Закрыть"/"Готово".
+    openModal(html, true);
     function backOut(toPid){
       closeOverlay();
       if (toPid) openPartnerDetail(toPid); else renderCalendarView();
@@ -3086,11 +3092,21 @@ tbody tr:hover{background:var(--panel-2)}
       var dateEl = document.getElementById("pstDate");
       var titleEl = document.getElementById("pstTaskTitle");
       var dueEl = document.getElementById("pstTaskDue");
+      var statusEl = document.getElementById("pstStatus");
       if (!dateEl || !titleEl || !dueEl || !dateEl.value) return;
-      if (dateEl.value < today()){
-        // Пост задним числом — напоминание по умолчанию не нужно. Если поля
-        // ещё содержат наш же авто-дефолт (пользователь их не трогал) —
-        // убираем; то, что вписали руками, не трогаем.
+      // Дефолтный пинг имеет смысл только для поста, который реально
+      // запланирован (статус "Запланирован") — если статус уже "Вышел"
+      // или "Отменён", напоминание "выйти на связь для контроля" не нужно.
+      // Раньше дефолт подставлялся при любом автосохранении независимо от
+      // статуса (он и так "planned" по умолчанию), из-за чего текст и срок
+      // задачи прописывались сами, стоило заполнить реф-код/тип/ссылку —
+      // ещё до того, как статус был осознанно выбран.
+      var isPlanned = !statusEl || statusEl.value === "planned";
+      if (!isPlanned || dateEl.value < today()){
+        // Пост задним числом или не в статусе "Запланирован" — напоминание
+        // по умолчанию не нужно. Если поля ещё содержат наш же авто-дефолт
+        // (пользователь их не трогал) — убираем; то, что вписали руками, не
+        // трогаем.
         if (pingAutoTitle){ titleEl.value = ""; pingAutoTitle = false; }
         if (pingAutoDue){ dueEl.value = ""; pingAutoDue = false; }
         return;
@@ -3209,7 +3225,7 @@ tbody tr:hover{background:var(--panel-2)}
       // о контроле того, что уже произошло; если задачу вписали вручную —
       // это не трогаем.
       extraRows.forEach(function(r){
-        if (r.date < today()) return;
+        if (r.status !== "planned" || r.date < today()) return;
         if (!r.taskTitle) r.taskTitle = "Выйти на связь для контроля";
         if (!r.taskDue) r.taskDue = addDaysToDateStr(r.date, -1);
       });
